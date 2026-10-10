@@ -1,0 +1,187 @@
+# 跟随上游 ximeiorg/Xime 自动构建「键盘底部贴底」补丁版 debug APK
+#
+# 设计要点：
+#  - 不向 fork 的 main 推送代码、也不做分支同步，因此不需要任何签名密钥或额外令牌，
+#    只用默认 GITHUB_TOKEN —— 规避了「GITHUB_TOKEN 无权更新 .github/workflows/」的限制。
+#  - 每次运行都直接检出上游 main 的最新代码，再套用 xime-flush-bottom.patch，
+#    所以「上游一有更新，下一次运行就是新版本」。
+#  - 构建步骤参照上游 .github/workflows/build.yml（debug 路径）。
+#    ⚠ 若上游改了构建方式（NDK 版本 / 依赖下载等），这里需要同步跟进，
+#      否则本工作流会构建失败（会变红，不会静默出错）。
+#  - 上游的 nightly.yml / release.yml 需要签名密钥（fork 里没有），已禁用，勿启用。
+name: Build patched APK (follow upstream)
+
+on:
+  schedule:
+    - cron: '0 16 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: '即使上游没有新提交也强制重新构建'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-patched-apk
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.decide.outputs.build }}
+      sha: ${{ steps.decide.outputs.sha }}
+    steps:
+      - name: 比对上游最新提交与上次构建
+        id: decide
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          SHA=$(git ls-remote https://github.com/ximeiorg/Xime.git refs/heads/main | cut -f1)
+          echo "上游 ximeiorg/Xime@main = $SHA"
+          LAST=$(gh release view patched-apk --repo "$GITHUB_REPOSITORY" --json body --jq .body 2>/dev/null | grep -o 'upstream-sha: [0-9a-f]\{40\}' | head -1 | cut -d' ' -f2 || true)
+          echo "上次成功构建于 = ${LAST:-<无记录>}"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event.inputs.force }}" = "true" ]; then
+            echo "手动强制构建"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          elif [ "$SHA" = "$LAST" ]; then
+            echo "上游无新提交，跳过构建"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "上游有更新，开始构建"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: check
+    if: needs.check.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出上游最新源码
+        uses: actions/checkout@v7
+        with:
+          repository: ximeiorg/Xime
+          ref: main
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: 套用「底部贴底」补丁
+        run: |
+          set -e
+          curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/xime-flush-bottom.patch" -o /tmp/flush.patch
+          echo "补丁行数: $(wc -l < /tmp/flush.patch)"
+          if ! git apply --verbose /tmp/flush.patch; then
+            echo "::error::补丁无法应用到上游最新代码 —— 上游很可能改动了这段逻辑，请更新 xime-flush-bottom.patch"
+            exit 1
+          fi
+          echo "上游 commit: $(git rev-parse --short HEAD)"
+          git --no-pager diff --stat
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v6
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+          cache-dependency-path: |
+            gradle/libs.versions.toml
+            **/*.gradle*
+            **/gradle-wrapper.properties
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+
+      - name: Install NDK and SDK platform
+        run: |
+          sdkmanager "ndk;29.0.14206865" "platforms;android-37.2"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> $GITHUB_ENV
+          echo "ANDROID_NDK=$ANDROID_HOME/ndk/29.0.14206865" >> $GITHUB_ENV
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build
+
+      - name: Cache native deps
+        uses: actions/cache@v6
+        with:
+          path: |
+            app/src/main/jni/onnxruntime
+            app/src/main/jniLibs/**/libonnxruntime.so
+          key: native-${{ runner.os }}-${{ hashFiles('app/build-logic/tasks-native.gradle.kts') }}
+          restore-keys: |
+            native-${{ runner.os }}-
+
+      - name: Download native deps (ONNX Runtime)
+        run: ./gradlew downloadOnnx --no-daemon --refresh-dependencies
+
+      - name: Cache CMake build
+        uses: actions/cache@v6
+        with:
+          path: |
+            app/.cxx
+            app/src/main/jni/boost
+            app/src/main/jni/boost-*.tar.xz
+          key: cmake-${{ runner.os }}-${{ hashFiles('app/src/main/jni/CMakeLists.txt') }}
+          restore-keys: |
+            cmake-${{ runner.os }}-
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Set up Rust (xime-plugin CLI)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            tools/xime-plugin/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('tools/xime-plugin/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
+
+      - name: Build Plugins (TS -> JS)
+        run: |
+          cd tools/xime-plugin
+          cargo run --quiet -- build --all --plugins-dir ../../plugins --out ../../build/plugin-js
+          cargo run --quiet -- build test-fixture --out ../../build/plugin-js
+
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: patched-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          retention-days: 30
+
+      - name: 发布到 Release（固定标签 patched-apk，永久链接）
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          APK=$(find app/build/outputs/apk/debug -name '*.apk' | head -1)
+          [ -n "$APK" ] || { echo "::error::没找到 APK"; exit 1; }
+          cp "$APK" xime-patched-debug.apk
+          UP=$(git rev-parse HEAD)
+          SHORT=$(git rev-parse --short HEAD)
+          NOTES=$(printf '跟随上游 ximeiorg/Xime 自动构建的「键盘底部贴底」补丁版（debug）。\n\n<!-- upstream-sha: %s -->\n\n- 上游 commit: `%s`\n- 补丁: 手势导航下键区贴到屏幕底边（inset ≤ 38dp 不留白；三键导航仍避让）\n- 包名: com.kingzcheung.xime —— 与官方同包名，安装前必须先卸载官方版\n- 签名: 调试密钥，无法被官方版覆盖升级\n- 构建记录: https://github.com/%s/actions\n' "$UP" "$SHORT" "$GITHUB_REPOSITORY")
+          if gh release view patched-apk --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit patched-apk --repo "$GITHUB_REPOSITORY" --notes "$NOTES"
+          else
+            gh release create patched-apk --repo "$GITHUB_REPOSITORY" --title "Xime 贴底补丁版（自动跟随上游）" --notes "$NOTES" --prerelease
+          fi
+          gh release upload patched-apk xime-patched-debug.apk --repo "$GITHUB_REPOSITORY" --clobber
+          echo "已发布: https://github.com/$GITHUB_REPOSITORY/releases/tag/patched-apk"

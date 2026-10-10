@@ -1,0 +1,51 @@
+--- a/app/src/main/java/com/kingzcheung/xime/service/XimeInputMethodService.kt
++++ b/app/src/main/java/com/kingzcheung/xime/service/XimeInputMethodService.kt
+@@ -1462,11 +1462,17 @@
+                 // 标准（三键）导航栏 inset 明显大于手势条，额外多减一点，
+                 // 让标准模式高度更接近抬高模式，但保留可辨识的差异。
+                 val extraShrinkDp = if (rawDp >= 120) 8 else 0
+-                val bottomSpaceDp = if (rawDp > 0) (rawDp - bottomInsetShrinkDp - extraShrinkDp).coerceAtLeast(0) else 0
+-                // 兜底仅用于彻底检测不到任何底部 inset 的场景（全屏沉浸），
+-                // 不再把已有差异（标准 44dp / 手势 16dp）强行垫平。
+-                val minBottomDp = 18
+-                val activeBottomDp = if (bottomSpaceDp == 0) minBottomDp else bottomSpaceDp
++                // ── 本地补丁：手势导航下键盘贴底 ──
++                // extractBottomInset 在手势导航上报 16dp（竖屏）/ 32dp（横屏），
++                // 三键导航上报 44dp 以上。手势条是半透明悬浮元素，键盘最后一排可以压在
++                // 它下面（Gboard / 语燕的观感），所以小 inset（≤ 38dp）一律不留白；
++                // 三键导航是实体栏，仍按原逻辑避让，避免按键被系统栏压住。
++                val bottomSpaceDp = if (rawDp > 38) {
++                    (rawDp - bottomInsetShrinkDp - extraShrinkDp).coerceAtLeast(0)
++                } else 0
++                // 原实现用 minBottomDp = 18 兜底：检测不到 inset 时反而垫出 18dp，
++                // 比手势条本身还高 —— 这正是"键盘不贴底"的来源之一。补丁移除该兜底。
++                val activeBottomDp = bottomSpaceDp
+                 val navBarDp = activeBottomDp.dp
+                 val hasNavBar = navBarDp > 0.dp
+                 // 左右边衬区：手机上键盘内容（候选栏 logo/收起按钮与按键区）避让挖孔/横屏导航栏；
+@@ -1834,9 +1840,10 @@
+                 val density = resources.displayMetrics.density
+                 val rawDp = if (bottomInsetPxState.value > 0)
+                     (bottomInsetPxState.value / density).toInt() else 0
++                // 本地补丁：与上方 SideEffect 保持一致 —— 手势导航（小 inset）不留白，键区贴底。
+                 val extraShrink = if (rawDp >= 120) 8 else 0
+-                val bottomSpace = if (rawDp > 0) (rawDp - 8 - extraShrink).coerceAtLeast(0) else 0
+-                val activeBottomDp = if (bottomSpace == 0) 18 else bottomSpace
++                val bottomSpace = if (rawDp > 38) (rawDp - 8 - extraShrink).coerceAtLeast(0) else 0
++                val activeBottomDp = bottomSpace
+                 view.updateLayoutParams<android.widget.FrameLayout.LayoutParams> {
+                     height = ((displayHeight + state.keyboardBottomPaddingDp + activeBottomDp) * density).toInt()
+                 }
+--- a/app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyboardLayout.kt
++++ b/app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyboardLayout.kt
+@@ -288,7 +288,9 @@
+                     modifier = Modifier
+                         .fillMaxWidth()
+                         .fillMaxHeight()
+-                        .padding(start = 4.dp, end = 4.dp, bottom = 8.dp),
++                        // 本地补丁：原本是 bottom = 8.dp，会在键区底部再叠一层内边距；
++                        // 与 XimeInputMethodService 的留白改动一起去掉，才能贴到屏幕底边。
++                        .padding(start = 4.dp, end = 4.dp, bottom = 0.dp),
+             ) {
+ 
+                 Column(
