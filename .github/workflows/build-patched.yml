@@ -78,12 +78,26 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
+      - name: 取回补丁与基准文件（它们在本 fork 的 main 上，不在上游代码树里）
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          REF="$RUNNER_TEMP/ref"
+          rm -rf "$REF" && mkdir -p "$REF/patch-base"
+          for f in xime-flush-bottom.patch patch-base/XimeInputMethodService.kt patch-base/KeyboardLayout.kt; do
+            gh api -H "Accept: application/vnd.github.raw" "repos/$GITHUB_REPOSITORY/contents/$f?ref=main" > "$REF/$f"
+          done
+          echo "已取回："
+          wc -l "$REF/xime-flush-bottom.patch" "$REF/patch-base/XimeInputMethodService.kt" "$REF/patch-base/KeyboardLayout.kt"
+
       - name: 套用补丁（三方合并，自动适配上游改动）
         run: |
           set -uo pipefail
           WS="$GITHUB_WORKSPACE"
-          PATCH="$WS/xime-flush-bottom.patch"
-          BASE="$WS/patch-base"
+          REF="$RUNNER_TEMP/ref"
+          PATCH="$REF/xime-flush-bottom.patch"
+          BASE="$REF/patch-base"
           F1="app/src/main/java/com/kingzcheung/xime/service/XimeInputMethodService.kt"
           F2="app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyboardLayout.kt"
           N1="XimeInputMethodService.kt"
@@ -143,7 +157,7 @@ jobs:
         run: |
           set -uo pipefail
           WS="$GITHUB_WORKSPACE"
-          BASE="$WS/patch-base"
+          BASE="$RUNNER_TEMP/ref/patch-base"
           F1="app/src/main/java/com/kingzcheung/xime/service/XimeInputMethodService.kt"
           F2="app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyboardLayout.kt"
           N1="XimeInputMethodService.kt"
@@ -157,7 +171,7 @@ jobs:
           cp "$WS/$F2" "$F2"
 
           echo "→ 旧做法（逐行 git apply）遇到这种改动："
-          if git apply --check "$WS/xime-flush-bottom.patch" 2>"$RUNNER_TEMP/old.err"; then
+          if git apply --check "$RUNNER_TEMP/ref/xime-flush-bottom.patch" 2>"$RUNNER_TEMP/old.err"; then
             echo "  意外：还能套上（扰动没落进上下文窗口）"
           else
             echo "  ✗ 失败（符合预期）—— 逐行匹配太脆"
