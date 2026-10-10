@@ -288,7 +288,9 @@ fun KeyboardLayout(
                     modifier = Modifier
                         .fillMaxWidth()
                         .fillMaxHeight()
-                        .padding(start = 4.dp, end = 4.dp, bottom = 8.dp),
+                        // 本地补丁：原本是 bottom = 8.dp，会在键区底部再叠一层内边距；
+                        // 与 XimeInputMethodService 的留白改动一起去掉，才能贴到屏幕底边。
+                        .padding(start = 4.dp, end = 4.dp, bottom = 0.dp),
             ) {
 
                 Column(
