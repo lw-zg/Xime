@@ -1,14 +1,21 @@
 # 跟随上游 ximeiorg/Xime 自动构建「键盘底部贴底」补丁版 debug APK
 #
-# 设计要点：
-#  - 不向 fork 的 main 推送代码、也不做分支同步，因此不需要任何签名密钥或额外令牌，
-#    只用默认 GITHUB_TOKEN —— 规避了「GITHUB_TOKEN 无权更新 .github/workflows/」的限制。
-#  - 每次运行都直接检出上游 main 的最新代码，再套用 xime-flush-bottom.patch，
-#    所以「上游一有更新，下一次运行就是新版本」。
-#  - 构建步骤参照上游 .github/workflows/build.yml（debug 路径）。
-#    ⚠ 若上游改了构建方式（NDK 版本 / 依赖下载等），这里需要同步跟进，
-#      否则本工作流会构建失败（会变红，不会静默出错）。
-#  - 上游的 nightly.yml / release.yml 需要签名密钥（fork 里没有），已禁用，勿启用。
+# ── 补丁是怎么"动态"适配上游的 ──────────────────────────────────────────
+# 不再用逐行精确匹配的 git apply（上游一改邻近代码就套不上），改成三方合并：
+#     current = 上游最新文件（本次检出）
+#     base    = patch-base/<文件> 里保存的「改动前的原版文件」
+#     other   = 把 xime-flush-bottom.patch 作用在 base 上还原出的「我们改完的版本」
+#   git merge-file 会把「我们相对 base 的那点改动」搬到上游最新代码上：
+#   上游在别处、甚至就在我们改的那几行上下动刀都不影响；
+#   只有真正改了同一行（语义冲突）才会冲突 —— 那时报错 + 打印冲突片段 + 构建失败，绝不静默出错。
+#
+# ── 其他要点 ──────────────────────────────────────────────────────────
+#  - 不向 fork 推代码、不需要任何签名密钥，只用默认 GITHUB_TOKEN
+#    （绕开「GITHUB_TOKEN 无权更新 .github/workflows/」的限制）。
+#  - 上游 nightly.yml / release.yml 依赖 secrets.SIGNING_KEY 等签名密钥，fork 里没有；
+#    GitHub 已自动把它们标成 disabled_fork，不要手动启用。
+#  - ⚠ 本工作流的构建步骤是上游 build.yml（debug 路径）的副本。上游若改了构建方式
+#    （NDK 版本、依赖下载等），这里需要同步跟进，否则会构建失败（会变红，不会静默）。
 name: Build patched APK (follow upstream)
 
 on:
@@ -17,7 +24,7 @@ on:
   workflow_dispatch:
     inputs:
       force:
-        description: '即使上游没有新提交也强制重新构建'
+        description: '即使上游没有新提交也强制重新构建（同时跑一遍三方合并自检）'
         required: false
         type: boolean
         default: false
@@ -71,17 +78,98 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      - name: 套用「底部贴底」补丁
+      - name: 套用补丁（三方合并，自动适配上游改动）
         run: |
-          set -e
-          curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/xime-flush-bottom.patch" -o /tmp/flush.patch
-          echo "补丁行数: $(wc -l < /tmp/flush.patch)"
-          if ! git apply --verbose /tmp/flush.patch; then
-            echo "::error::补丁无法应用到上游最新代码 —— 上游很可能改动了这段逻辑，请更新 xime-flush-bottom.patch"
+          set -uo pipefail
+          WS="$GITHUB_WORKSPACE"
+          PATCH="$WS/xime-flush-bottom.patch"
+          BASE="$WS/patch-base"
+          F1="app/src/main/java/com/kingzcheung/xime/service/XimeInputMethodService.kt"
+          F2="app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyboardLayout.kt"
+          N1="XimeInputMethodService.kt"
+          N2="KeyboardLayout.kt"
+
+          echo "── 1) 把补丁作用在 base 副本上，还原出「我们改完的版本」──"
+          rm -rf "$RUNNER_TEMP/base" && mkdir -p "$RUNNER_TEMP/base"
+          cd "$RUNNER_TEMP/base" && git init -q .
+          mkdir -p "$(dirname "$F1")" "$(dirname "$F2")"
+          cp "$BASE/$N1" "$F1"
+          cp "$BASE/$N2" "$F2"
+          if ! git apply "$PATCH"; then
+            echo "::error::补丁在本仓库保存的 base 文件上都套不上 —— patch-base/ 与 xime-flush-bottom.patch 不配对，请一起重新生成"
             exit 1
           fi
-          echo "上游 commit: $(git rev-parse --short HEAD)"
+          cp "$F1" "$RUNNER_TEMP/post-$N1"
+          cp "$F2" "$RUNNER_TEMP/post-$N2"
+          echo "  ✓ base + 补丁 = 目标版本（各 $(wc -l < "$F1") / $(wc -l < "$F2") 行）"
+
+          echo "── 2) 与上游最新代码做三方合并 ──"
+          cd "$WS"
+          CONFLICT=0
+          for pair in "$F1|$N1" "$F2|$N2"; do
+            rel="${pair%%|*}"; n="${pair##*|}"
+            if git merge-file -p -L "上游最新/$n" -L "改动前的原版/$n" -L "我们改完的/$n" \
+                 "$WS/$rel" "$BASE/$n" "$RUNNER_TEMP/post-$n" > "$RUNNER_TEMP/merged-$n" 2>"$RUNNER_TEMP/merr-$n"; then
+              echo "  ✓ $n 干净合并（$(wc -l < "$RUNNER_TEMP/merged-$n") 行）"
+              cp "$RUNNER_TEMP/merged-$n" "$WS/$rel"
+            else
+              echo "::error::$n 三方合并冲突：上游改的正是我们改动的那几行，补丁需要人工更新"
+              echo "────── $n 冲突片段 ──────"
+              grep -n -A8 '^<<<<<<<' "$RUNNER_TEMP/merged-$n" | head -80 || true
+              echo "──────────────────────────"
+              cp "$RUNNER_TEMP/merged-$n" "$WS/CONFLICT-$n"
+              CONFLICT=1
+            fi
+          done
+          if [ "$CONFLICT" != "0" ]; then
+            echo "::error::补丁已失效。请用上游最新代码重新生成 xime-flush-bottom.patch 与 patch-base/ 后再试"
+            exit 1
+          fi
+
+          echo "── 3) 校验补丁效果确实生效 ──"
+          fail=0
+          c=$(grep -c -F 'if (rawDp > 38)' "$WS/$F1" || true)
+          if [ "$c" != "2" ]; then echo "::error::'if (rawDp > 38)' 出现 $c 次，应为 2 次"; fail=1; fi
+          if grep -q -F 'val minBottomDp' "$WS/$F1"; then echo "::error::仍存在 val minBottomDp（18dp 兜底没去掉）"; fail=1; fi
+          if ! grep -q -F 'padding(start = 4.dp, end = 4.dp, bottom = 0.dp)' "$WS/$F2"; then echo "::error::键区内边距没改成 0.dp"; fail=1; fi
+          if grep -q -F 'padding(start = 4.dp, end = 4.dp, bottom = 8.dp)' "$WS/$F2"; then echo "::error::键区内边距仍是 8.dp"; fail=1; fi
+          if [ "$fail" != "0" ]; then exit 1; fi
+          echo "  ✓ 两处 38dp 阈值 + 去掉 18dp 兜底 + 键区内边距归零，全部到位"
+          echo "── 相对上游的最终改动 ──"
           git --no-pager diff --stat
+
+      - name: 自检 —— 三方合并能否扛住「上游改了我们上下文那几行」
+        if: github.event.inputs.force == 'true'
+        run: |
+          set -uo pipefail
+          WS="$GITHUB_WORKSPACE"
+          BASE="$WS/patch-base"
+          F1="app/src/main/java/com/kingzcheung/xime/service/XimeInputMethodService.kt"
+          F2="app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyboardLayout.kt"
+          N1="XimeInputMethodService.kt"
+          N2="KeyboardLayout.kt"
+
+          # 造一个「上游动了紧邻代码」的场景：改掉补丁 hunk 里的一条上下文行
+          rm -rf "$RUNNER_TEMP/pert" && mkdir -p "$RUNNER_TEMP/pert"
+          cd "$RUNNER_TEMP/pert" && git init -q .
+          mkdir -p "$(dirname "$F1")" "$(dirname "$F2")"
+          sed 's|\(val extraShrinkDp = if (rawDp >= 120) 8 else 0\)|\1  // upstream touched|' "$WS/$F1" > "$F1"
+          cp "$WS/$F2" "$F2"
+
+          echo "→ 旧做法（逐行 git apply）遇到这种改动："
+          if git apply --check "$WS/xime-flush-bottom.patch" 2>"$RUNNER_TEMP/old.err"; then
+            echo "  意外：还能套上（扰动没落进上下文窗口）"
+          else
+            echo "  ✗ 失败（符合预期）—— 逐行匹配太脆"
+          fi
+
+          echo "→ 新做法（三方合并）："
+          if git merge-file -p "$RUNNER_TEMP/pert/$F1" "$BASE/$N1" "$RUNNER_TEMP/post-$N1" > "$RUNNER_TEMP/st.kt"; then
+            echo "  ✓ 干净合并 —— 上游的邻近改动被自动绕开"
+          else
+            echo "::error::自检失败：三方合并没能扛住邻近改动"
+            exit 1
+          fi
 
       - name: Set up JDK 17
         uses: actions/setup-java@v6
@@ -160,6 +248,17 @@ jobs:
       - name: Build Debug APK
         run: ./gradlew assembleDebug --no-daemon
 
+      - name: 上传冲突文件（仅在失败时可复盘）
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: patch-conflict-dump
+          path: |
+            CONFLICT-*.kt
+            patch-base/**
+          if-no-files-found: ignore
+          retention-days: 30
+
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
@@ -177,7 +276,7 @@ jobs:
           cp "$APK" xime-patched-debug.apk
           UP=$(git rev-parse HEAD)
           SHORT=$(git rev-parse --short HEAD)
-          NOTES=$(printf '跟随上游 ximeiorg/Xime 自动构建的「键盘底部贴底」补丁版（debug）。\n\n<!-- upstream-sha: %s -->\n\n- 上游 commit: `%s`\n- 补丁: 手势导航下键区贴到屏幕底边（inset ≤ 38dp 不留白；三键导航仍避让）\n- 包名: com.kingzcheung.xime —— 与官方同包名，安装前必须先卸载官方版\n- 签名: 调试密钥，无法被官方版覆盖升级\n- 构建记录: https://github.com/%s/actions\n' "$UP" "$SHORT" "$GITHUB_REPOSITORY")
+          NOTES=$(printf '跟随上游 ximeiorg/Xime 自动构建的「键盘底部贴底」补丁版（debug）。\n\n<!-- upstream-sha: %s -->\n\n- 上游 commit: `%s`\n- 补丁: 手势导航下键区贴到屏幕底边（inset ≤ 38dp 不留白；三键导航仍避让）\n- 融合方式: 三方合并（自动适配上游改动），冲突时构建会失败并给出冲突片段\n- 包名: com.kingzcheung.xime —— 与官方同包名，安装前必须先卸载官方版\n- 签名: 调试密钥，无法被官方版覆盖升级\n- 构建记录: https://github.com/%s/actions\n' "$UP" "$SHORT" "$GITHUB_REPOSITORY")
           if gh release view patched-apk --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release edit patched-apk --repo "$GITHUB_REPOSITORY" --notes "$NOTES"
           else
