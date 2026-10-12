@@ -25,6 +25,9 @@
 #    GitHub 已自动把它们标成 disabled_fork，不要手动启用。
 #  - ⚠ 本工作流的构建步骤是上游 build.yml / release.yml 的副本（已做 ABI 收敛）。
 #    上游若改了构建方式（NDK 版本、依赖下载等），这里需要同步跟进，否则会构建失败（会变红，不会静默）。
+#  - 构建并发布成功后，若仓库配置了 MAIL_* 系列 Secrets（MAIL_TO / MAIL_FROM / MAIL_SMTP_SERVER /
+#    MAIL_SMTP_PORT / MAIL_USERNAME / MAIL_PASSWORD），会通过 dawidd6/action-send-mail 发一封
+#    邮件通知（收件人、SMTP 等都只存在 Secrets 里；没配置就自动跳过，不影响任何构建步骤）。
 name: Build patched APK (follow upstream)
 
 on:
@@ -100,6 +103,13 @@ jobs:
     needs: check
     if: needs.check.outputs.build == 'true'
     runs-on: ubuntu-latest
+    outputs:
+      url: ${{ steps.publish.outputs.url }}
+      sha: ${{ steps.publish.outputs.sha }}
+      sha256: ${{ steps.publish.outputs.sha256 }}
+      size: ${{ steps.publish.outputs.size }}
+      variant: ${{ steps.publish.outputs.variant }}
+      tag: ${{ steps.publish.outputs.tag }}
     steps:
       - name: 检出上游最新源码
         uses: actions/checkout@v7
@@ -410,6 +420,7 @@ jobs:
           retention-days: 30
 
       - name: 发布到 Release（固定标签，永久链接）
+        id: publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VARIANT: ${{ needs.check.outputs.variant }}
@@ -441,3 +452,41 @@ jobs:
           gh release upload "$TAG" "$OUT" --repo "$GITHUB_REPOSITORY" --clobber
           echo "已发布: https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG"
           echo "永久链接: https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$OUT"
+          {
+            echo "url=https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$OUT"
+            echo "sha=$SHORT"
+            echo "sha256=$SHA256"
+            echo "size=$SIZE"
+            echo "variant=$VARIANT"
+            echo "tag=$TAG"
+          } >> "$GITHUB_OUTPUT"
+
+  notify:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: 发送邮件通知（未配置 MAIL_TO 时自动跳过，且永不影响构建结果）
+        if: ${{ secrets.MAIL_TO != '' }}
+        continue-on-error: true
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.MAIL_SMTP_SERVER }}
+          server_port: ${{ secrets.MAIL_SMTP_PORT }}
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: "Xime 贴底补丁版新 APK 已构建（${{ needs.build.outputs.variant }} · ${{ needs.build.outputs.sha }}）"
+          from: ${{ secrets.MAIL_FROM }}
+          to: ${{ secrets.MAIL_TO }}
+          body: |
+            Xime「键盘底部贴底」补丁版 APK 已自动跟随上游更新并重新构建、发布。
+
+            上游 commit : ${{ needs.build.outputs.sha }}
+            构建类型    : ${{ needs.build.outputs.variant }}
+            目标架构    : 仅 arm64-v8a
+            sha256     : ${{ needs.build.outputs.sha256 }}
+            大小        : ${{ needs.build.outputs.size }} 字节
+
+            永久下载链接（固定，覆盖安装即可升级，不丢 Rime 数据）:
+            ${{ needs.build.outputs.url }}
+
+            —— 由 fork lw-zg/Xime 的 build-patched.yml 自动发出
