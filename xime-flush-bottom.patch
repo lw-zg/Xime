@@ -1,6 +1,6 @@
 --- a/app/src/main/java/com/kingzcheung/xime/service/XimeInputMethodService.kt
 +++ b/app/src/main/java/com/kingzcheung/xime/service/XimeInputMethodService.kt
-@@ -1462,11 +1462,17 @@
+@@ -1472,11 +1472,17 @@
                  // 标准（三键）导航栏 inset 明显大于手势条，额外多减一点，
                  // 让标准模式高度更接近抬高模式，但保留可辨识的差异。
                  val extraShrinkDp = if (rawDp >= 120) 8 else 0
@@ -23,7 +23,7 @@
                  val navBarDp = activeBottomDp.dp
                  val hasNavBar = navBarDp > 0.dp
                  // 左右边衬区：手机上键盘内容（候选栏 logo/收起按钮与按键区）避让挖孔/横屏导航栏；
-@@ -1834,9 +1840,10 @@
+@@ -1844,9 +1850,10 @@
                  val density = resources.displayMetrics.density
                  val rawDp = if (bottomInsetPxState.value > 0)
                      (bottomInsetPxState.value / density).toInt() else 0
@@ -38,14 +38,14 @@
                  }
 --- a/app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyboardLayout.kt
 +++ b/app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyboardLayout.kt
-@@ -288,7 +288,9 @@
-                     modifier = Modifier
+@@ -286,7 +286,9 @@
                          .fillMaxWidth()
                          .fillMaxHeight()
--                        .padding(start = 4.dp, end = 4.dp, bottom = 8.dp),
-+                        // 本地补丁：原本是 bottom = 8.dp，会在键区底部再叠一层内边距；
+                         // 平板键盘两侧留边（Gboard 式不满宽），手机维持贴边紧凑
+-                        .padding(start = if (tabletParams) 16.dp else 4.dp, end = if (tabletParams) 16.dp else 4.dp, bottom = 8.dp),
++                        // ── 本地补丁：原本键区底部内边距为 8.dp，会再叠一层；
 +                        // 与 XimeInputMethodService 的留白改动一起去掉，才能贴到屏幕底边。
-+                        .padding(start = 4.dp, end = 4.dp, bottom = 0.dp),
++                        .padding(start = if (tabletParams) 16.dp else 4.dp, end = if (tabletParams) 16.dp else 4.dp, bottom = 0.dp),
              ) {
  
                  Column(
