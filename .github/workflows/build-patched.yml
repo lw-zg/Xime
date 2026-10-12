@@ -193,8 +193,9 @@ jobs:
           c2=$(grep -c -F 'bottom = 0.dp' "$RUNNER_TEMP/f2code.kt" || true)
           if [ "$c2" != "1" ]; then echo "::error::键区代码里 'bottom = 0.dp' 出现 $c2 次，应为 1 次"; fail=1; fi
           if grep -q -F 'bottom = 8.dp' "$RUNNER_TEMP/f2code.kt"; then echo "::error::键区代码里仍是 bottom = 8.dp"; fail=1; fi
+          if ! grep -q -F 'BOTTOM_ROW_OUTER_CORNER_RADIUS' "$WS/$F2"; then echo "::error::底排外侧圆角补丁丢失（BOTTOM_ROW_OUTER_CORNER_RADIUS 未出现）"; fail=1; fi
           if [ "$fail" != "0" ]; then exit 1; fi
-          echo "  ✓ 两处 38dp 阈值 + 去掉 18dp 兜底 + 键区内边距归零，全部到位"
+          echo "  ✓ 两处 38dp 阈值 + 去掉 18dp 兜底 + 键区内边距归零 + 底排外侧圆角，全部到位"
           echo "── 相对上游的最终改动 ──"
           git --no-pager diff --stat
 

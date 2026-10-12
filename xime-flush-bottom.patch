@@ -49,3 +49,41 @@
              ) {
  
                  Column(
+@@ -369,10 +371,22 @@
+                                     .fillMaxWidth((9f / firstRowSize).coerceIn(0f, 1f))
+                                     .align(Alignment.CenterHorizontally)
+                             } else Modifier
++                            // ── 本地补丁：底排外侧下角跟随手机屏幕 R 角 ──
++                            // 贴底后底排顶到屏幕底边，手机屏幕的圆角会把最左（?123）/最右（换行）
++                            // 两键的下外角切掉。这里只给「最后一行」整排的底部外侧做圆角裁切，
++                            // 让这两个键的下外角顺着屏幕圆角收进去，而不是被切一刀。
++                            val bottomOuterCorner = if (idx == rows.lastIndex) {
++                                Modifier.clip(
++                                    RoundedCornerShape(
++                                        bottomStart = BOTTOM_ROW_OUTER_CORNER_RADIUS,
++                                        bottomEnd = BOTTOM_ROW_OUTER_CORNER_RADIUS,
++                                    )
++                                )
++                            } else Modifier
+                             QwertyRow(
+                                 ids = ids,
+                                 env = env,
+-                                modifier = Modifier.weight(1f).then(indent),
++                                modifier = Modifier.weight(1f).then(indent).then(bottomOuterCorner),
+                             )
+                         }
+                     }
+@@ -562,6 +576,13 @@
+ 
+ /** 平板键面圆角下限：键圆角与阴影圆角在平板上共同对齐此值，两处解析（主键盘/分体）共享。 */
+ internal val TABLET_KEY_CORNER_RADIUS = 14.dp
++
++/**
++ * 底排外侧下角圆角（本地补丁）：贴底后底排顶到屏幕底边，手机屏幕自身的圆角会把最左（?123）/
++ * 最右（换行）两键的下外角切掉。给「最后一行」整排的底部外侧做此半径的圆角裁切，
++ * 让这两个键的下外角顺着屏幕圆角收进去，而不再是被切一刀。
++ */
++internal val BOTTOM_ROW_OUTER_CORNER_RADIUS = 24.dp
+ 
+ /** 平板键面提示（数字上标、退格的「清空」等）的额外放大倍率；主键盘与面板共用同一档。 */
+ internal const val TABLET_HINT_EXTRA_SCALE = 1.35f
