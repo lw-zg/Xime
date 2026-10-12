@@ -464,9 +464,12 @@ jobs:
   notify:
     needs: build
     runs-on: ubuntu-latest
+    env:
+      # GitHub 的 steps[*].if 不允许引用 secrets 上下文；先把 secret 提升成 env 才能在 if 里判断。
+      MAIL_TO: ${{ secrets.MAIL_TO }}
     steps:
       - name: 发送邮件通知（未配置 MAIL_TO 时自动跳过，且永不影响构建结果）
-        if: ${{ secrets.MAIL_TO != '' }}
+        if: env.MAIL_TO != ''
         continue-on-error: true
         uses: dawidd6/action-send-mail@v3
         with:
