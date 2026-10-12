@@ -1,4 +1,13 @@
-# 跟随上游 ximeiorg/Xime 自动构建「键盘底部贴底」补丁版 debug APK
+# 跟随上游 ximeiorg/Xime 自动构建「键盘底部贴底」补丁版 APK
+#
+# ── 产物 ───────────────────────────────────────────────────────────────
+# 默认构建 **release**（R8 精简 + 资源压缩），且只打包 **arm64-v8a**，用**固定密钥**签名：
+#   · release   -> Release 标签 `patched-apk`        （永久链接，可覆盖安装升级）
+#   · debug     -> Release 标签 `patched-apk-debug`  （手动触发时的备用路径）
+# 只取 arm64-v8a 一个架构：现代手机都是它，能省掉另外 3 份 native 库（约 35 MB×3）。
+# ⚠ 曾经踩过的坑：以前用 `find ... | head -1` 随手取一个 APK，结果发布出去的是 **x86_64**
+#   那一份（真机装上去加载不到 librime 会崩）。现在改成按 TARGET_ABI 明确挑选，
+#   并在发布前**核对 APK 内的 native 架构**，不符就红。
 #
 # ── 补丁是怎么"动态"适配上游的 ──────────────────────────────────────────
 # 不再用逐行精确匹配的 git apply（上游一改邻近代码就套不上），改成三方合并：
@@ -10,12 +19,12 @@
 #   只有真正改了同一行（语义冲突）才会冲突 —— 那时报错 + 打印冲突片段 + 构建失败，绝不静默出错。
 #
 # ── 其他要点 ──────────────────────────────────────────────────────────
-#  - 不向 fork 推代码、不需要任何签名密钥，只用默认 GITHUB_TOKEN
-#    （绕开「GITHUB_TOKEN 无权更新 .github/workflows/」的限制）。
+#  - 不向 fork 推代码。签名密钥从本仓库 Secrets 注入（SIGNING_KEY / KEY_STORE_PASSWORD /
+#    ALIAS / KEY_PASSWORD），只在 runner 上落地成 app/keystore.properties，不提交。
 #  - 上游 nightly.yml / release.yml 依赖 secrets.SIGNING_KEY 等签名密钥，fork 里没有；
 #    GitHub 已自动把它们标成 disabled_fork，不要手动启用。
-#  - ⚠ 本工作流的构建步骤是上游 build.yml（debug 路径）的副本。上游若改了构建方式
-#    （NDK 版本、依赖下载等），这里需要同步跟进，否则会构建失败（会变红，不会静默）。
+#  - ⚠ 本工作流的构建步骤是上游 build.yml / release.yml 的副本（已做 ABI 收敛）。
+#    上游若改了构建方式（NDK 版本、依赖下载等），这里需要同步跟进，否则会构建失败（会变红，不会静默）。
 name: Build patched APK (follow upstream)
 
 on:
@@ -28,6 +37,14 @@ on:
         required: false
         type: boolean
         default: false
+      variant:
+        description: '构建类型：release = 签名精简版（推荐）；debug = 调试版'
+        required: false
+        type: choice
+        options:
+          - release
+          - debug
+        default: release
 
 permissions:
   contents: write
@@ -36,12 +53,18 @@ concurrency:
   group: build-patched-apk
   cancel-in-progress: false
 
+env:
+  # 只打这一种架构。想改回通用包就把下面改成 universal 之外的策略并调整选取逻辑。
+  TARGET_ABI: arm64-v8a
+
 jobs:
   check:
     runs-on: ubuntu-latest
     outputs:
       build: ${{ steps.decide.outputs.build }}
       sha: ${{ steps.decide.outputs.sha }}
+      variant: ${{ steps.decide.outputs.variant }}
+      tag: ${{ steps.decide.outputs.tag }}
     steps:
       - name: 比对上游最新提交与上次构建
         id: decide
@@ -49,11 +72,19 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
+          VARIANT="${{ github.event.inputs.variant }}"
+          [ -n "$VARIANT" ] || VARIANT=release
+          if [ "$VARIANT" = "debug" ]; then TAG=patched-apk-debug; else TAG=patched-apk; fi
+          echo "构建类型 = $VARIANT ；Release 标签 = $TAG"
           SHA=$(git ls-remote https://github.com/ximeiorg/Xime.git refs/heads/main | cut -f1)
           echo "上游 ximeiorg/Xime@main = $SHA"
-          LAST=$(gh release view patched-apk --repo "$GITHUB_REPOSITORY" --json body --jq .body 2>/dev/null | grep -o 'upstream-sha: [0-9a-f]\{40\}' | head -1 | cut -d' ' -f2 || true)
+          LAST=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body 2>/dev/null | grep -o 'upstream-sha: [0-9a-f]\{40\}' | head -1 | cut -d' ' -f2 || true)
           echo "上次成功构建于 = ${LAST:-<无记录>}"
-          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          {
+            echo "sha=$SHA"
+            echo "variant=$VARIANT"
+            echo "tag=$TAG"
+          } >> "$GITHUB_OUTPUT"
           if [ "${{ github.event.inputs.force }}" = "true" ]; then
             echo "手动强制构建"
             echo "build=true" >> "$GITHUB_OUTPUT"
@@ -282,8 +313,73 @@ jobs:
           cargo run --quiet -- build --all --plugins-dir ../../plugins --out ../../build/plugin-js
           cargo run --quiet -- build test-fixture --out ../../build/plugin-js
 
-      - name: Build Debug APK
-        run: ./gradlew assembleDebug --no-daemon
+      - name: 写入签名配置（release 必需；只在 runner 上落地，不提交）
+        if: needs.check.outputs.variant == 'release'
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          KEY_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -e
+          [ -n "${SIGNING_KEY:-}" ] || { echo "::error::仓库缺少 SIGNING_KEY secret，release 无法签名"; exit 1; }
+          [ -n "${KEY_STORE_PASSWORD:-}" ] || { echo "::error::仓库缺少 KEY_STORE_PASSWORD secret"; exit 1; }
+          [ -n "${KEY_ALIAS:-}" ] || { echo "::error::仓库缺少 ALIAS secret"; exit 1; }
+          [ -n "${KEY_PASSWORD:-}" ] || { echo "::error::仓库缺少 KEY_PASSWORD secret"; exit 1; }
+          cat > app/keystore.properties <<EOF
+          keyBase64=${SIGNING_KEY}
+          storePassword=${KEY_STORE_PASSWORD}
+          keyAlias=${KEY_ALIAS}
+          keyPassword=${KEY_PASSWORD}
+          EOF
+          echo "已写入 app/keystore.properties（$(( $(wc -c < app/keystore.properties) )) 字节，不入库）"
+          git status --porcelain app/keystore.properties || true
+
+      - name: Build APK
+        run: |
+          if [ "${{ needs.check.outputs.variant }}" = "release" ]; then
+            ./gradlew assembleRelease --no-daemon
+          else
+            ./gradlew assembleDebug --no-daemon
+          fi
+
+      - name: 校验 release 签名
+        if: needs.check.outputs.variant == 'release'
+        run: |
+          set -e
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | tail -1)
+          for apk in app/build/outputs/apk/release/*.apk; do
+            "$APKSIGNER" verify --print-certs "$apk" >/dev/null
+            echo "已验签: $apk"
+          done
+
+      - name: 选定 APK 并核对内含架构
+        id: pick
+        run: |
+          set -euo pipefail
+          DIR="app/build/outputs/apk/${{ needs.check.outputs.variant }}"
+          echo "产物目录："
+          ls -l "$DIR"
+          APK=$(find "$DIR" -name "*-${TARGET_ABI}.apk" | head -1)
+          STRICT=1
+          if [ -z "$APK" ]; then
+            echo "::warning::没找到 ${TARGET_ABI} 专属包，退回 universal"
+            APK=$(find "$DIR" -name '*universal.apk' | head -1)
+            STRICT=0
+          fi
+          [ -n "$APK" ] || { echo "::error::目录里没有 APK"; exit 1; }
+          echo "选中: $APK"
+          echo "内含 native 架构："
+          unzip -l "$APK" | grep -o 'lib/[^/]*/' | sort -u
+          if [ "$STRICT" = "1" ]; then
+            BAD=$(unzip -l "$APK" | grep -o 'lib/[^/]*/' | sed 's#lib/##; s#/##' | sort -u | grep -v -x "$TARGET_ABI" || true)
+            if [ -n "$BAD" ]; then
+              echo "::error::选中的 APK 里含非目标架构（$(echo "$BAD" | tr '\n' ' ')），应只有 $TARGET_ABI —— 选取逻辑出错了"
+              exit 1
+            fi
+            echo "  ✓ 只含 $TARGET_ABI"
+          fi
+          echo "apk=$APK" >> "$GITHUB_OUTPUT"
 
       - name: 收集失败现场（仅失败时；基准文件在 $RUNNER_TEMP，要先拷回工作区）
         if: failure()
@@ -309,25 +405,39 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: patched-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          name: patched-${{ needs.check.outputs.variant }}-apk
+          path: app/build/outputs/apk/${{ needs.check.outputs.variant }}/*.apk
           retention-days: 30
 
-      - name: 发布到 Release（固定标签 patched-apk，永久链接）
+      - name: 发布到 Release（固定标签，永久链接）
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VARIANT: ${{ needs.check.outputs.variant }}
+          TAG: ${{ needs.check.outputs.tag }}
         run: |
           set -e
-          APK=$(find app/build/outputs/apk/debug -name '*.apk' | head -1)
-          [ -n "$APK" ] || { echo "::error::没找到 APK"; exit 1; }
-          cp "$APK" xime-patched-debug.apk
+          APK="${{ steps.pick.outputs.apk }}"
+          OUT="xime-patched-${VARIANT}-${TARGET_ABI}.apk"
+          cp "$APK" "$OUT"
           UP=$(git rev-parse HEAD)
           SHORT=$(git rev-parse --short HEAD)
-          NOTES=$(printf '跟随上游 ximeiorg/Xime 自动构建的「键盘底部贴底」补丁版（debug）。\n\n<!-- upstream-sha: %s -->\n\n- 上游 commit: `%s`\n- 补丁: 手势导航下键区贴到屏幕底边（inset ≤ 38dp 不留白；三键导航仍避让）\n- 融合方式: 三方合并（自动适配上游改动），冲突时构建会失败并给出冲突片段\n- 包名: com.kingzcheung.xime —— 与官方同包名，安装前必须先卸载官方版\n- 签名: 调试密钥，无法被官方版覆盖升级\n- 构建记录: https://github.com/%s/actions\n' "$UP" "$SHORT" "$GITHUB_REPOSITORY")
-          if gh release view patched-apk --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release edit patched-apk --repo "$GITHUB_REPOSITORY" --notes "$NOTES"
+          SHA256=$(sha256sum "$OUT" | cut -d' ' -f1)
+          SIZE=$(stat -c%s "$OUT")
+          if [ "$VARIANT" = "release" ]; then
+            TITLE="Xime 贴底补丁版 · release（arm64，自动跟随上游）"
+            KIND="release（R8 精简 + 资源压缩）"
+            SIGN="固定密钥签名（密钥存在本仓库 Secrets 里）—— 以后**可直接覆盖安装升级，不会丢 Rime 数据**"
           else
-            gh release create patched-apk --repo "$GITHUB_REPOSITORY" --title "Xime 贴底补丁版（自动跟随上游）" --notes "$NOTES" --prerelease
+            TITLE="Xime 贴底补丁版 · debug（arm64，自动跟随上游）"
+            KIND="debug"
+            SIGN="调试密钥（每次构建可能不同）—— 更新前需要先卸载"
           fi
-          gh release upload patched-apk xime-patched-debug.apk --repo "$GITHUB_REPOSITORY" --clobber
-          echo "已发布: https://github.com/$GITHUB_REPOSITORY/releases/tag/patched-apk"
+          NOTES=$(printf '跟随上游 ximeiorg/Xime 自动构建的「键盘底部贴底」补丁版。\n\n<!-- upstream-sha: %s -->\n\n- 上游 commit: `%s`\n- 构建类型: %s\n- 目标架构: 仅 `%s`（现代手机适用；其他架构请改工作流的 TARGET_ABI）\n- 补丁: 手势导航下键区贴到屏幕底边（inset ≤ 38dp 不留白；三键导航仍避让）\n- 融合方式: 三方合并（自动适配上游改动），冲突时构建会失败并给出冲突片段\n- 包名: com.kingzcheung.xime —— 与官方同包名，首次安装前必须先卸载官方版\n- 签名: %s\n- sha256: `%s`\n- 大小: %s 字节\n- 构建记录: https://github.com/%s/actions\n' "$UP" "$SHORT" "$KIND" "$TARGET_ABI" "$SIGN" "$SHA256" "$SIZE" "$GITHUB_REPOSITORY")
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes "$NOTES"
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TITLE" --notes "$NOTES" --prerelease
+          fi
+          gh release upload "$TAG" "$OUT" --repo "$GITHUB_REPOSITORY" --clobber
+          echo "已发布: https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG"
+          echo "永久链接: https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$OUT"
