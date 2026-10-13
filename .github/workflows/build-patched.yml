@@ -342,6 +342,204 @@ jobs:
           echo "── 相对上游的最终改动 ──"
           git --no-pager diff --stat
 
+      - name: Kotlin 结构预检（括号配平 + 链式逗号位置）
+        # 为什么需要这道闸门：git apply / git merge-file 只保证补丁「套得上」，
+        # 不保证合并产物还是合法 Kotlin。run #17 就是合并干净、断言全过，但
+        # KeyButton.kt 里 `.background(...) ,` 的逗号（它终止外层 Box 的 modifier
+        # 参数）后面被插进了 `.then(...)` 修饰链 → 编译语法错误，白跑 13 分钟 Gradle。
+        # 这里在搭 JDK/NDK/Rust 之前，用几秒钟的纯文本结构检查先拦一道。
+        run: |
+          set -uo pipefail
+          cd "$GITHUB_WORKSPACE"
+          F1="app/src/main/java/com/kingzcheung/xime/service/XimeInputMethodService.kt"
+          F2="app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyboardLayout.kt"
+          F3="app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyButton.kt"
+          F4="app/src/main/java/com/kingzcheung/xime/ui/theme/KeyboardTheme.kt"
+          F6="app/src/main/java/com/kingzcheung/xime/ui/settings/ThemeSettingsScreen.kt"
+          F7="app/src/main/java/com/kingzcheung/xime/viewmodel/ThemeSettingsViewModel.kt"
+          F8="app/src/main/java/com/kingzcheung/xime/ui/keyboard/SwipeBubble.kt"
+          python3 - "$F1" "$F2" "$F3" "$F4" "$F6" "$F7" "$F8" <<'PYEOF'
+          import sys
+
+          def blank_noncode(text):
+              """把注释与字符串/字符字面量替换成空格（保留换行，行号列号不变）。"""
+              out = list(text)
+              n = len(text)
+              i = 0
+              stack = []  # 'str' | 'raw' | 'chr' | ('tmpl', depth)
+
+              def bl(k):
+                  if text[k] != "\n":
+                      out[k] = " "
+
+              while i < n:
+                  c = text[i]
+                  top = stack[-1] if stack else None
+                  if top is None:
+                      if c == "/" and i + 1 < n and text[i + 1] == "/":
+                          j = text.find("\n", i)
+                          j = n if j == -1 else j
+                          for k in range(i, j):
+                              bl(k)
+                          i = j
+                          continue
+                      if c == "/" and i + 1 < n and text[i + 1] == "*":
+                          j = text.find("*/", i + 2)
+                          j = n if j == -1 else j + 2
+                          for k in range(i, j):
+                              bl(k)
+                          i = j
+                          continue
+                      if c == '"':
+                          if text.startswith('"""', i):
+                              for k in range(i, i + 3):
+                                  bl(k)
+                              stack.append("raw")
+                              i += 3
+                              continue
+                          bl(i)
+                          stack.append("str")
+                          i += 1
+                          continue
+                      if c == "'":
+                          bl(i)
+                          stack.append("chr")
+                          i += 1
+                          continue
+                      i += 1
+                      continue
+                  if top == "str":
+                      if c == "\\":
+                          bl(i)
+                          if i + 1 < n:
+                              bl(i + 1)
+                          i += 2
+                          continue
+                      if c == '"':
+                          bl(i)
+                          stack.pop()
+                          i += 1
+                          continue
+                      if c == "$" and i + 1 < n and text[i + 1] == "{":
+                          bl(i)
+                          bl(i + 1)
+                          stack.append(("tmpl", 0))
+                          i += 2
+                          continue
+                      bl(i)
+                      i += 1
+                      continue
+                  if top == "raw":
+                      if text.startswith('"""', i):
+                          for k in range(i, i + 3):
+                              bl(k)
+                          stack.pop()
+                          i += 3
+                          continue
+                      bl(i)
+                      i += 1
+                      continue
+                  if top == "chr":
+                      if c == "\\":
+                          bl(i)
+                          if i + 1 < n:
+                              bl(i + 1)
+                          i += 2
+                          continue
+                      if c == "'":
+                          bl(i)
+                          stack.pop()
+                          i += 1
+                          continue
+                      bl(i)
+                      i += 1
+                      continue
+                  # ('tmpl', depth)：字符串模板 ${...} 内部，允许嵌套字符串
+                  if c == "{":
+                      stack[-1] = ("tmpl", top[1] + 1)
+                      bl(i)
+                      i += 1
+                      continue
+                  if c == "}":
+                      if top[1] == 0:
+                          stack.pop()
+                      else:
+                          stack[-1] = ("tmpl", top[1] - 1)
+                      bl(i)
+                      i += 1
+                      continue
+                  if c == '"':
+                      if text.startswith('"""', i):
+                          for k in range(i, i + 3):
+                              bl(k)
+                          stack.append("raw")
+                          i += 3
+                          continue
+                      bl(i)
+                      stack.append("str")
+                      i += 1
+                      continue
+                  if c == "'":
+                      bl(i)
+                      stack.append("chr")
+                      i += 1
+                      continue
+                  bl(i)
+                  i += 1
+                  continue
+              return "".join(out), bool(stack)
+
+          def check_text(name, text):
+              problems = []
+              code, unclosed = blank_noncode(text)
+              if unclosed:
+                  problems.append("%s: 剥离注释/字符串后仍有未闭合的字符串或模板" % name)
+              lines = code.split("\n")
+              pairs = {")": "(", "]": "[", "}": "{"}
+              st = []
+              for ln, line in enumerate(lines, 1):
+                  for ch in line:
+                      if ch in "([{":
+                          st.append((ch, ln))
+                      elif ch in ")]}":
+                          if not st:
+                              problems.append("%s:%d 多余的右括号 %r" % (name, ln, ch))
+                          elif st[-1][0] != pairs[ch]:
+                              problems.append("%s:%d 括号不匹配：%r 开于第 %d 行" % (name, ln, st[-1][0], st[-1][1]))
+                              st.pop()
+                          else:
+                              st.pop()
+              for ch, ln in st:
+                  problems.append("%s:%d 左括号 %r 没有闭合" % (name, ln, ch))
+              prev = ""
+              prev_ln = 0
+              for ln, line in enumerate(lines, 1):
+                  s = line.strip()
+                  if s.startswith(".") and prev.endswith(","):
+                      problems.append("%s:%d 以 `.` 开头的链式调用出现在以 `,` 结尾的行之后"
+                                      "（第 %d 行的逗号已终止参数/表达式 → 语法错误）" % (name, ln, prev_ln))
+                  if s:
+                      prev = line.rstrip()
+                      prev_ln = ln
+              return problems
+
+          bad = 0
+          for p in sys.argv[1:]:
+              with open(p, encoding="utf-8", newline="") as fh:
+                  text = fh.read()
+              probs = check_text(p, text)
+              if probs:
+                  bad = 1
+                  for x in probs:
+                      print("  x " + x)
+              else:
+                  print("  ok %s" % p)
+          if bad:
+              print("::error::Kotlin 结构预检未通过 —— 合并产物存在语法级问题，请先修补丁再构建")
+              sys.exit(1)
+          print("  ok Kotlin 结构预检全部通过（括号配平 + 链式逗号位置）")
+          PYEOF
+
       - name: 自检 —— 三方合并对上游邻近改动的容忍度与失败可见性
         # 纯体检步骤，不阻塞真正的构建（真正的保护是上一步的合并与断言）。
         # 它演示两个方向：① 上游改到 hunk 上下文里「隔开几行」的一条 —— 逐行 apply 已套不上，

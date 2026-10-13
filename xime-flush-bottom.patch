@@ -448,7 +448,7 @@
 +                if (backgroundColor.alpha < 0.05f) {
 +                    if (isPressed) textColor.copy(alpha = 0.30f) else Color.Transparent
 +                } else if (isPressed) darkenColor(backgroundColor) else backgroundColor
-+            ),
++            )
 +            // ── 本地补丁：无键帽模式（底色透明）时改画按键边框，键位依然清晰可辨 ──
 +            .then(if (backgroundColor.alpha < 0.05f) Modifier.border(1.dp, textColor.copy(alpha = 0.35f), keyClipShape) else Modifier),
          contentAlignment = Alignment.TopStart
