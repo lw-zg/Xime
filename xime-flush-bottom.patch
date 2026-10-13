@@ -213,7 +213,7 @@
      val specialKeyTextColor = KeyboardThemes.getSpecialKeyTextColorForBackground(
          specialKeyBackgroundColor, keyTextColor
      )
-+    // ── 本地补丁：无键帽模式（主题设置页「无键帽模式」总开关，或内置「无键帽」主题）下
++    // ── 本地补丁：无键帽模式（主题设置页「无键帽模式」总开关，或尚未迁移的旧主题 id）下
 +    //    键面与特殊键底色一律透明；特殊键文字色改用主题强调色（透明底上按亮度自适应
 +    //    会算出近白色，浅色键盘上看不见），其余主题取值不变。
 +    val keycapHidden = KeyboardThemes.isKeycapHidden(themeId)
@@ -434,12 +434,12 @@
  import java.io.File
  import java.io.FileInputStream
  import java.io.InputStream
-@@ -98,6 +99,33 @@
+@@ -98,6 +99,36 @@
  )
  
  object KeyboardThemes {
 +    // ── 本地补丁：「无键帽」模式 = 主题设置页里的「无键帽模式」总开关，适配所有主题 ──
-+    /** 内置「无键帽」主题 id（保留兼容：旧版本选中过该主题的用户仍生效）。 */
++    /** 旧版内置「无键帽」主题的 id。该主题已下架（改由全局开关实现），此常量仅用于迁移旧选择。 */
 +    const val HIDDEN_KEYCAP_ID = "no_keycap"
 +
 +    /**
@@ -449,7 +449,10 @@
 +     */
 +    private var noKeycapMode by mutableStateOf(false)
 +
-+    /** 无键帽是否生效：全局开关开启，或仍选中内置「无键帽」主题（向后兼容）。 */
++    /**
++     * 无键帽是否生效：全局开关开启；或主题 id 仍是那个已下架的旧值
++     * （[initFromConfig] 迁移前的短暂窗口，让老用户升级后第一帧不会闪回键帽）。
++     */
 +    fun isKeycapHidden(themeId: String): Boolean = noKeycapMode || themeId == HIDDEN_KEYCAP_ID
 +
 +    /** 全局「无键帽」开关当前值（设置页初始状态用）。 */
@@ -468,42 +471,30 @@
      /** 从 xime.yaml 加载的配置覆盖项。 */
      private var configOverrides: Map<String, ColorSchemeEntry> = emptyMap()
  
-@@ -116,6 +144,20 @@
-             primaryContainerDark = Color(0xFF4F378B),
-             surfaceLight = Color(0xFFFAF8FC),
-             surfaceDark = Color(0xFF2B2930)
-+        ),
-+        // ── 本地补丁：内置「无键帽」主题（向后兼容旧版本的选择）。
-+        //    现在无键帽是全局开关（见 isKeycapHidden），此主题等价于「强制透明」。
-+        KeyboardColorScheme(
-+            id = HIDDEN_KEYCAP_ID,
-+            name = "无键帽",
-+            specialKeyLight = Color(0xFFE8DEF8),
-+            specialKeyDark = Color(0xFF6750A4),
-+            accentLight = Color(0xFF8F73E2),
-+            accentDark = Color(0xFFD0BCFF),
-+            surfaceLight = Color(0xFFFAF8FC),
-+            surfaceDark = Color(0xFF2B2930),
-+            keyBgLight = Color.Transparent,
-+            keyBgDark = Color.Transparent,
-         )
-     )
- 
-@@ -129,6 +171,9 @@
+@@ -129,6 +160,18 @@
  
      /** 从配置文件加载主题覆盖项。应在 Application.onCreate 中调用。 */
      fun initFromConfig(context: Context) {
 +        // ── 本地补丁：恢复全局「无键帽」开关（各进程冷启动时读一次持久化值）──
-+        noKeycapMode = SettingsPreferences.getPrefsPublic(context)
-+            .getBoolean(KEY_NO_KEYCAP_MODE, false)
++        val prefs = SettingsPreferences.getPrefsPublic(context)
++        noKeycapMode = prefs.getBoolean(KEY_NO_KEYCAP_MODE, false)
++        // ── 本地补丁：迁移已下架的旧内置「无键帽」主题 ──
++        // 旧版把「无键帽」做成一个配色主题；现在它改成全局开关、并从主题列表里删掉了。
++        // 若用户当初选的就是它，这里把主题切回默认、顺手把全局开关打开：观感与升级前一致，
++        // 主题列表里也不会残留一个永远选不中的 id。
++        if (SettingsPreferences.getKeyboardTheme(context) == HIDDEN_KEYCAP_ID) {
++            SettingsPreferences.setKeyboardTheme(context, SettingsPreferences.defaultKeyboardTheme)
++            noKeycapMode = true
++            prefs.edit().putBoolean(KEY_NO_KEYCAP_MODE, true).apply()
++        }
          reload(context)
      }
  
-@@ -533,6 +578,9 @@
+@@ -533,6 +576,9 @@
  
      /** 返回 color_schemes 中显式定义的按键背景色，未定义返回 null。 */
      fun getKeyBgColorOverride(themeId: String, isDark: Boolean): Color? {
-+        // ── 本地补丁：无键帽模式（全局开关或内置主题）下键面底色恒为透明。
++        // ── 本地补丁：无键帽模式（全局开关，或尚未迁移的旧主题 id）下键面底色恒为透明。
 +        //    主键盘、分体、面板与主题预览共用此取值，一处改全局生效。
 +        if (isKeycapHidden(themeId)) return Color.Transparent
          dynamicThemeColor(themeId) { if (isDark) it.keyBgDark else it.keyBgLight }?.let { return it }
@@ -522,7 +513,26 @@
      - "https://cdn.jsdelivr.net/gh/ximeiorg/xime-index@master/"
      - "https://fastly.jsdelivr.net/gh/ximeiorg/xime-index@master/"
      - "https://index.ximei.me/"
-@@ -491,9 +495,9 @@
+@@ -103,6 +107,18 @@
+       type: solid
+       color: 0xE3E4E8
+       color_dark: 0x1A1A1A
++
++  # ── 本地补丁：在「沉稳石墨」基础上新增的纯黑变体 ──
++  #    只把深色模式的键盘底色由 0x1A1A1A 改成纯黑 0x000000（AMOLED 屏更省电、熄灯更彻底），
++  #    其余字段与「沉稳石墨」逐项一致；按键底色仍走全局 0x60FFFFFF 半透明白，纯黑底上呈深灰键面。
++  slate_amoled:
++    name: "石墨纯黑"
++    primary_color: 0x424242
++    candidate_selected_text_color_dark: 0xF0F0F0
++    keyboard_background:
++      type: solid
++      color: 0xE3E4E8
++      color_dark: 0x000000
+   
+   rose_pink:
+     name: "浪漫玫瑰"
+@@ -491,9 +507,9 @@
        z: { tap: "z", swipe_up: { label: "＊", value: "*" }, swipe_down: { label: "", action: "none", display: "key", bubble: false }, long_press: { display: "bubble", values: [ "z","Z"] } }
        x: { tap: "x", swipe_up: { label: "＠", value: "@" }, swipe_down: { label: "弓匕纟幺弓𠤎", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["x", "X"] } }
        c: { tap: "c", swipe_up: { label: "、", value: "、" }, swipe_down: { label: "又巴马厶龴ス", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["c", "C", "ç"] } }
@@ -534,7 +544,7 @@
        m: { tap: "m", swipe_up: { label: "＃", value: "#" }, swipe_down: { label: "山由贝冂冎几", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["m", "M"] } }
        # shift：单击切单击态、双击锁定大写；命令值走键盘按键路由（shift_single / shift_caps）
        shift: { width: 1.4, tap: { action: command, value: shift_single }, double_tap: { action: command, value: shift_caps } }
-@@ -553,9 +557,9 @@
+@@ -553,9 +569,9 @@
        z: { tap: "z", swipe_up: "*", long_press: { display: "bubble", values: ["z", "Z"] } }
        x: { tap: "x", swipe_up: "@", long_press: { display: "bubble", values: ["x", "X"] } }
        c: { tap: "c", swipe_up: "、", long_press: { display: "bubble", values: ["c", "C"] } }
@@ -546,7 +556,7 @@
        m: { tap: "m", swipe_up: "#", long_press: { display: "bubble", values: ["m", "M"] } }
        # shift：单击切单击态、双击锁定大写（命令值走键盘按键路由）
        shift: { width: 1.4, tap: { action: command, value: shift_single }, double_tap: { action: command, value: shift_caps } }
-@@ -624,9 +628,9 @@
+@@ -624,9 +640,9 @@
        z: { tap: { value: "z", bubble: false }, swipe_up: { label: "＊", value: "*" }, swipe_down: { label: "", action: "none", display: "key", bubble: false }, long_press: { display: "bubble", values: [ "z","Z"] } }
        x: { tap: { value: "x", bubble: false }, swipe_up: { label: "＠", value: "@" }, swipe_down: { label: "弓匕纟幺弓𠤎", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["x", "X"] } }
        c: { tap: { value: "c", bubble: false }, swipe_up: { label: "、", value: "、" }, swipe_down: { label: "又巴马厶龴ス", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["c", "C", "ç"] } }
@@ -558,7 +568,7 @@
        m: { tap: { value: "m", bubble: false }, swipe_up: { label: "＃", value: "#" }, swipe_down: { label: "山由贝冂冎几", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["m", "M"] } }
        # 逗号/句号独立成键（value 经 rime 引擎，中文态自动转全角）
        comma: { width: 1, tap: {  label: "，", value: ",", bubble: false } }
-@@ -679,9 +683,9 @@
+@@ -679,9 +695,9 @@
        z: { tap: { value: "z", bubble: false }, swipe_up: "*", long_press: { display: "bubble", values: ["z", "Z"] } }
        x: { tap: { value: "x", bubble: false }, swipe_up: "@", long_press: { display: "bubble", values: ["x", "X"] } }
        c: { tap: { value: "c", bubble: false }, swipe_up: "、", long_press: { display: "bubble", values: ["c", "C"] } }

@@ -312,7 +312,11 @@ jobs:
           if grep -q -F 'androidx.compose.foundation.border' "$WS/$F3"; then echo "::error::KeyButton.kt 仍 import border（边框已移除，import 应一并去掉）"; fail=1; fi
           if [ "$(grep -c -F 'alpha = 0.30f' "$WS/$F3" || true)" != "5" ]; then echo "::error::$N3 里透明键面按下/高亮反馈应为 5 处"; fail=1; fi
           if ! grep -q -F 'suppressClick' "$WS/$F3"; then echo "::error::滑键点击抑制丢失（suppressClick 未出现）—— 可能重复触发"; fail=1; fi
-          if ! grep -q -F 'HIDDEN_KEYCAP_ID' "$WS/$F4"; then echo "::error::「无键帽」主题 id 兼容丢失（HIDDEN_KEYCAP_ID 未出现）"; fail=1; fi
+          if ! grep -q -F 'HIDDEN_KEYCAP_ID' "$WS/$F4"; then echo "::error::旧「无键帽」主题 id 丢失（HIDDEN_KEYCAP_ID 未出现）—— 迁移逻辑会失效"; fail=1; fi
+          # 内置「无键帽」主题必须已从主题列表删除（否则主题列表里会多一个多余条目）
+          if grep -q -F 'keyBgLight = Color.Transparent' "$WS/$F4"; then echo "::error::内置「无键帽」主题还在主题列表里（keyBgLight = Color.Transparent 不该出现）"; fail=1; fi
+          if ! grep -q -F 'SettingsPreferences.getKeyboardTheme(context) == HIDDEN_KEYCAP_ID' "$WS/$F4"; then echo "::error::缺旧主题选择迁移（用户升级后会残留一个选不中的主题 id）"; fail=1; fi
+          if ! grep -q -F 'SettingsPreferences.setKeyboardTheme(context, SettingsPreferences.defaultKeyboardTheme)' "$WS/$F4"; then echo "::error::迁移未把主题切回默认值"; fail=1; fi
           if ! grep -q -F 'if (isKeycapHidden(themeId)) return Color.Transparent' "$WS/$F4"; then echo "::error::「无键帽」取色守卫丢失（getKeyBgColorOverride 未返回透明）"; fail=1; fi
           if ! grep -q -F 'KEY_NO_KEYCAP_MODE' "$WS/$F4"; then echo "::error::无键帽开关持久化丢失（KEY_NO_KEYCAP_MODE 未出现）"; fail=1; fi
           if ! grep -q -F 'isNoKeycapModeEnabled' "$WS/$F4"; then echo "::error::无键帽全局开关读取丢失（isNoKeycapModeEnabled 未出现）"; fail=1; fi
@@ -339,6 +343,12 @@ jobs:
           if [ "$c8" != "2" ]; then echo "::error::英文键盘 v 上滑 % 出现 $c8 次，应为 2 次（qwerty_en + qwerty_en_tablet）"; fail=1; fi
           c9=$(grep -c -F 'swipe_up: "?"' "$WS/$F5" || true)
           if [ "$c9" != "4" ]; then echo "::error::swipe_up \"?\" 出现 $c9 次，应为 4 次（英文 n 键 2 处互换进来 + qwerty_17/18 原有 2 处）"; fail=1; fi
+          # 新增主题「石墨纯黑」(slate_amoled)：沉稳石墨的 AMOLED 纯黑变体（仅深色键盘底变纯黑）
+          if ! grep -q -F '  slate_amoled:' "$WS/$F5"; then echo "::error::$N5 里新增主题 slate_amoled 丢失"; fail=1; fi
+          if ! grep -q -F 'name: "石墨纯黑"' "$WS/$F5"; then echo "::error::新增主题名「石墨纯黑」丢失"; fail=1; fi
+          c12=$(grep -c -F 'color_dark: 0x000000' "$WS/$F5" || true)
+          if [ "$c12" != "1" ]; then echo "::error::$N5 里纯黑底 color_dark: 0x000000 出现 $c12 次，应为 1 次（仅新主题）"; fail=1; fi
+          if ! grep -q -F 'color_dark: 0x1A1A1A' "$WS/$F5"; then echo "::error::原「沉稳石墨」主题 color_dark: 0x1A1A1A 被改动（本体不该变）"; fail=1; fi
           # SwipeBubble.kt：按键气泡去掉（按压气泡 + 上滑/下滑提示气泡），只保留长按选择弹窗
           if ! grep -q -F 'if (!swipeState.isLongPress) return null' "$WS/$F8"; then echo "::error::按键气泡守卫丢失（非长按状态仍在画气泡）"; fail=1; fi
           if ! grep -q -F '本地补丁：去掉按键气泡' "$WS/$F8"; then echo "::error::气泡补丁标记丢失"; fail=1; fi
@@ -353,7 +363,7 @@ jobs:
           if [ "$c11" != "1" ]; then echo "::error::符号浮层 onBack() 调用应只剩 1 处，实际 $c11 处"; fail=1; fi
           if ! grep -q -F '// 底部：返回 + 分类 Tab + 删除按钮' "$WS/$F9"; then echo "::error::符号浮层底部行注释没更新"; fail=1; fi
           if [ "$fail" != "0" ]; then exit 1; fi
-          echo "  ✓ 两处 38dp 阈值 + 去掉 18dp 兜底 + 键区内边距归零 + 底排外侧圆角 + 滑键改判（误触修复） + 无键帽全局开关（键面无底色无边框）+ 主题设置页开关 + 内置方案市场镜像索引 + ？↔％ 互换 + 去掉按键气泡 + 符号浮层返回键挪左下角，全部到位"
+          echo "  ✓ 两处 38dp 阈值 + 去掉 18dp 兜底 + 键区内边距归零 + 底排外侧圆角 + 滑键改判（误触修复） + 无键帽全局开关（键面无底色无边框，旧「无键帽」主题已下架并迁移）+ 主题设置页开关 + 内置方案市场镜像索引 + ？↔％ 互换 + 新增「石墨纯黑」主题 + 去掉按键气泡 + 符号浮层返回键挪左下角，全部到位"
           echo "── 相对上游的最终改动 ──"
           git --no-pager diff --stat
 
@@ -906,9 +916,9 @@ jobs:
             KIND="debug"
             SIGN="调试密钥（每次构建可能不同）—— 更新前需要先卸载"
           fi
-          NOTES=$(printf '跟随上游 ximeiorg/Xime 自动构建的「键盘底部贴底」补丁版。\n\n<!-- upstream-release: %s -->\n<!-- upstream-ref: %s -->\n<!-- upstream-sha: %s -->\n\n- 触发 release: `%s`\n- 上游版本: `%s`（versionCode %s，%s 轨道）\n- 上游源码引用: `%s`（有新 commit 即随 main 拉取）\n- 上游 commit: `%s`\n- 构建类型: %s\n- 目标架构: 仅 `%s`（现代手机适用；其他架构请改工作流的 TARGET_ABI）\n- 补丁: 手势导航下键区贴到屏幕底边（inset ≤ 38dp 不留白；三键导航仍避让）\n- 误触修复: 拇指指腹先触发的行不再抢先输出——松手时按手指最终落点改判按键；上滑/长按/光标手势不受影响\n- 无键帽模式: 主题设置里新增总开关，**对所有主题生效**；开启后键面完全不画底色也**不画边框**（与主题选择页的预览一致，只留文字/图标），按下/高亮时给出提示；关闭后各主题观感不变\n- 键位调整: qwerty / qwerty_en / qwerty_tablet / qwerty_en_tablet 四个键盘段的 **v 键上滑与 n 键上滑对调（？ ↔ ％）**\n- 按键气泡: 按压气泡与上滑/下滑提示气泡已**去掉**（主键盘/面板/T9/笔画通用）；长按选择弹窗保留——它承担滑动挑选变体的视觉反馈，去掉会长按选字变成盲选\n- 符号页返回键: 全量符号浮层的返回键从**左上角**挪到**左下角**（底部行行首，圆形 ← 外观与行为不变），单手拇指更够得着；分类 Tab 与删除键位置不变\n- 内置方案市场: `assets/xime.yaml` 的 `base_urls` 顶部加入自建镜像（含 **oh-my-rime 薄荷拼音**等额外方案，可在「输入方案」里一键下载安装）；官方镜像保留作后备\n- 融合方式: 三方合并（自动适配上游改动），冲突时构建会失败并给出冲突片段\n- 包名: com.kingzcheung.xime —— 与官方同包名，首次安装前必须先卸载官方版\n- 签名: %s\n- sha256: `%s`\n- 大小: %s 字节\n- 资产: %s（带版本号）/ %s（稳定别名，永久链接不变）\n- 构建记录: https://github.com/%s/actions\n' "$UP_REL" "$UP_REF" "$UP" "$UP_REL" "$UP_VER" "${UP_VC:-?}" "$UP_MODE" "$UP_REF" "$SHORT" "$KIND" "$TARGET_ABI" "$SIGN" "$SHA256" "$SIZE" "$OUT" "$ALIAS" "$GITHUB_REPOSITORY")
+          NOTES=$(printf '跟随上游 ximeiorg/Xime 自动构建的「键盘底部贴底」补丁版。\n\n<!-- upstream-release: %s -->\n<!-- upstream-ref: %s -->\n<!-- upstream-sha: %s -->\n\n- 触发 release: `%s`\n- 上游版本: `%s`（versionCode %s，%s 轨道）\n- 上游源码引用: `%s`（有新 commit 即随 main 拉取）\n- 上游 commit: `%s`\n- 构建类型: %s\n- 目标架构: 仅 `%s`（现代手机适用；其他架构请改工作流的 TARGET_ABI）\n- 补丁: 手势导航下键区贴到屏幕底边（inset ≤ 38dp 不留白；三键导航仍避让）\n- 误触修复: 拇指指腹先触发的行不再抢先输出——松手时按手指最终落点改判按键；上滑/长按/光标手势不受影响\n- 无键帽模式: 主题设置里新增总开关，**对所有主题生效**；开启后键面完全不画底色也**不画边框**（与主题选择页的预览一致，只留文字/图标），按下/高亮时给出提示；关闭后各主题观感不变。原先那个叫「无键帽」的配色主题已**从主题列表删除**（有了总开关就多余了）——老用户若正选着它，首次启动会自动切回默认主题并把这个开关打开，观感不变\n- 键位调整: qwerty / qwerty_en / qwerty_tablet / qwerty_en_tablet 四个键盘段的 **v 键上滑与 n 键上滑对调（？ ↔ ％）**\n- 新增主题: 在「沉稳石墨」基础上加了一个纯黑变体 **「石墨纯黑」**——只把深色模式的键盘底色由深灰 `0x1A1A1A` 换成纯黑 `0x000000`（AMOLED 屏更省电、熄灯更彻底），其余配色与「沉稳石墨」逐项一致，主题列表里可直接切换\n- 按键气泡: 按压气泡与上滑/下滑提示气泡已**去掉**（主键盘/面板/T9/笔画通用）；长按选择弹窗保留——它承担滑动挑选变体的视觉反馈，去掉会长按选字变成盲选\n- 符号页返回键: 全量符号浮层的返回键从**左上角**挪到**左下角**（底部行行首，圆形 ← 外观与行为不变），单手拇指更够得着；分类 Tab 与删除键位置不变\n- 内置方案市场: `assets/xime.yaml` 的 `base_urls` 顶部加入自建镜像（含 **oh-my-rime 薄荷拼音**等额外方案，可在「输入方案」里一键下载安装）；官方镜像保留作后备\n- 融合方式: 三方合并（自动适配上游改动），冲突时构建会失败并给出冲突片段\n- 包名: com.kingzcheung.xime —— 与官方同包名，首次安装前必须先卸载官方版\n- 签名: %s\n- sha256: `%s`\n- 大小: %s 字节\n- 资产: %s（带版本号）/ %s（稳定别名，永久链接不变）\n- 构建记录: https://github.com/%s/actions\n' "$UP_REL" "$UP_REF" "$UP" "$UP_REL" "$UP_VER" "${UP_VC:-?}" "$UP_MODE" "$UP_REF" "$SHORT" "$KIND" "$TARGET_ABI" "$SIGN" "$SHA256" "$SIZE" "$OUT" "$ALIAS" "$GITHUB_REPOSITORY")
           # 正式版 Release（不是 prerelease）——这样 GitHub 主页右侧的 Releases 栏
-          # 与 releases/latest 都会指向这个「可下载的最新编译版」，而不是被每日自动
+          # 与 releases/latest 都会指向这个「可下载的最新编译版」，而不是被每 6 小时自动
           # 更新的方案包 prerelease 抢走（方案包刻意保持 prerelease，不参与 latest 计算）。
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes "$NOTES" --prerelease=false --latest
