@@ -73,17 +73,150 @@
                              )
                          }
                      }
-@@ -562,6 +576,13 @@
- 
+@@ -563,6 +577,13 @@
  /** 平板键面圆角下限：键圆角与阴影圆角在平板上共同对齐此值，两处解析（主键盘/分体）共享。 */
  internal val TABLET_KEY_CORNER_RADIUS = 14.dp
-+
+ 
 +/**
 + * 底排外侧下角圆角（本地补丁）：贴底后底排顶到屏幕底边，手机屏幕自身的圆角会把最左（?123）/
 + * 最右（换行）两键的下外角切掉。给「最后一行」整排的底部外侧做此半径的圆角裁切，
 + * 让这两个键的下外角顺着屏幕圆角收进去，而不再是被切一刀。
 + */
 +internal val BOTTOM_ROW_OUTER_CORNER_RADIUS = 24.dp
- 
++
  /** 平板键面提示（数字上标、退格的「清空」等）的额外放大倍率；主键盘与面板共用同一档。 */
  internal const val TABLET_HINT_EXTRA_SCALE = 1.35f
+ 
+@@ -616,11 +637,14 @@
+     val specialKeyTextColor = KeyboardThemes.getSpecialKeyTextColorForBackground(
+         specialKeyBackgroundColor, keyTextColor
+     )
++    // ── 本地补丁：内置「无键帽」主题下键面底色一律透明（文字色仍按原底色对比度计算）。
++    //    仅该主题生效，其它主题取值不变。
++    val keycapHidden = KeyboardThemes.isKeycapHidden(themeId)
+     return KeyboardPalette(
+         keyboardBackgroundColor = KeyboardThemes.getKeyboardBackgroundColor(themeId, isDarkTheme),
+-        keyBackgroundColor = keyBackgroundColor,
++        keyBackgroundColor = if (keycapHidden) Color.Transparent else keyBackgroundColor,
+         keyTextColor = keyTextColor,
+-        specialKeyBackgroundColor = specialKeyBackgroundColor,
++        specialKeyBackgroundColor = if (keycapHidden) Color.Transparent else specialKeyBackgroundColor,
+         specialKeyTextColor = specialKeyTextColor,
+         bubbleBgColor = if (isDarkTheme) themeScheme.specialKeyDark else themeScheme.specialKeyLight,
+     )
+@@ -1749,7 +1773,9 @@
+             .then(shadowModifier)
+             .clip(keyClipShape)
+             .background(
+-                if (isPressed) darkenColor(backgroundColor, 0.1f)
++                if (backgroundColor.alpha < 0.05f) {
++                    if (isPressed || shiftMode != ShiftMode.OFF) iconColor.copy(alpha = 0.30f) else Color.Transparent
++                } else if (isPressed) darkenColor(backgroundColor, 0.1f)
+                 else if (shiftMode == ShiftMode.CAPS) darkenColor(backgroundColor, 0.2f)
+                 else if (shiftMode == ShiftMode.SINGLE) darkenColor(backgroundColor, 0.1f)
+                 else backgroundColor
+--- a/app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyButton.kt
++++ b/app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyButton.kt
+@@ -138,6 +138,8 @@
+ private val shadowColorCache = HashMap<Color, Color>()
+ 
+ internal fun crispShadowColor(backgroundColor: Color): Color {
++    // ── 本地补丁：「无键帽」主题键面底色透明 → 不画键影（否则会留下一块白色幽灵影子）
++    if (backgroundColor.alpha < 0.05f) return Color.Transparent
+     return shadowColorCache.getOrPut(backgroundColor) {
+         val r = backgroundColor.red
+         val g = backgroundColor.green
+@@ -388,7 +390,9 @@
+             .then(shadowModifier)
+             .clip(keyClipShape)
+             .background(
+-                if (isPressed) darkenColor(backgroundColor, 0.2f)
++                if (backgroundColor.alpha < 0.05f) {
++                    if (isPressed || isHighlighted) textColor.copy(alpha = 0.30f) else Color.Transparent
++                } else if (isPressed) darkenColor(backgroundColor, 0.2f)
+                 else if (isHighlighted) backgroundColor.copy(alpha = 0.8f)
+                 else backgroundColor
+             )
+@@ -791,7 +795,9 @@
+             .then(shadowModifier)
+             .clip(keyClipShape)
+             .background(
+-                if (isPressed) backgroundColor.copy(alpha = 0.7f)
++                if (backgroundColor.alpha < 0.05f) {
++                    if (isPressed || isHighlighted) textColor.copy(alpha = 0.30f) else Color.Transparent
++                } else if (isPressed) backgroundColor.copy(alpha = 0.7f)
+                 else if (isHighlighted) backgroundColor.copy(alpha = 0.8f)
+                 else backgroundColor
+             )
+@@ -1153,7 +1159,9 @@
+             .then(shadowModifier)
+             .clip(keyClipShape)
+             .background(
+-                if (isPressed) darkenColor(backgroundColor, 0.1f)
++                if (backgroundColor.alpha < 0.05f) {
++                    if (isPressed || isHighlighted) iconColor.copy(alpha = 0.30f) else Color.Transparent
++                } else if (isPressed) darkenColor(backgroundColor, 0.1f)
+                 else if (isHighlighted) darkenColor(backgroundColor, 0.2f)
+                 else backgroundColor
+             )
+@@ -1490,7 +1498,9 @@
+             .then(shadowModifier)
+             .clip(keyClipShape)
+             .background(
+-                if (isPressed) darkenColor(backgroundColor, 0.2f)
++                if (backgroundColor.alpha < 0.05f) {
++                    if (isPressed || isHighlighted) iconColor.copy(alpha = 0.30f) else Color.Transparent
++                } else if (isPressed) darkenColor(backgroundColor, 0.2f)
+                 else if (isHighlighted) backgroundColor.copy(alpha = 0.8f)
+                 else backgroundColor
+             )
+@@ -1869,7 +1879,11 @@
+             .padding(LocalKeyVisualPadding.current)
+             .then(shadowModifier)
+             .clip(keyClipShape)
+-            .background(if (isPressed) darkenColor(backgroundColor) else backgroundColor),
++            .background(
++                if (backgroundColor.alpha < 0.05f) {
++                    if (isPressed) textColor.copy(alpha = 0.30f) else Color.Transparent
++                } else if (isPressed) darkenColor(backgroundColor) else backgroundColor
++            ),
+         contentAlignment = Alignment.TopStart
+     ) {
+         val contentScale = adaptiveKeyContentScale(
+--- a/app/src/main/java/com/kingzcheung/xime/ui/theme/KeyboardTheme.kt
++++ b/app/src/main/java/com/kingzcheung/xime/ui/theme/KeyboardTheme.kt
+@@ -98,6 +98,13 @@
+ )
+ 
+ object KeyboardThemes {
++    // ── 本地补丁：内置「无键帽」主题（键面透明，仅按下/高亮提示）。不影响任何其它主题。
++    /** 内置「无键帽」主题 id。 */
++    const val HIDDEN_KEYCAP_ID = "no_keycap"
++
++    /** 该主题是否隐藏键帽底色（键面不绘制底色的主题）。 */
++    fun isKeycapHidden(themeId: String): Boolean = themeId == HIDDEN_KEYCAP_ID
++
+     /** 从 xime.yaml 加载的配置覆盖项。 */
+     private var configOverrides: Map<String, ColorSchemeEntry> = emptyMap()
+ 
+@@ -116,6 +123,20 @@
+             primaryContainerDark = Color(0xFF4F378B),
+             surfaceLight = Color(0xFFFAF8FC),
+             surfaceDark = Color(0xFF2B2930)
++        ),
++        // ── 本地补丁：内置「无键帽」主题。键面底色透明（不显示键帽），
++        //    只在按下/高亮时用半透明内容色提示；文字/特殊键配色沿用默认，保证可读。
++        KeyboardColorScheme(
++            id = HIDDEN_KEYCAP_ID,
++            name = "无键帽",
++            specialKeyLight = Color(0xFFE8DEF8),
++            specialKeyDark = Color(0xFF6750A4),
++            accentLight = Color(0xFF8F73E2),
++            accentDark = Color(0xFFD0BCFF),
++            surfaceLight = Color(0xFFFAF8FC),
++            surfaceDark = Color(0xFF2B2930),
++            keyBgLight = Color.Transparent,
++            keyBgDark = Color.Transparent,
+         )
+     )
+ 
