@@ -709,3 +709,75 @@
  
      val isLongPressMode = swipeState.isLongPress && swipeState.longPressItems.isNotEmpty()
      val displayText = if (isLongPressMode) null
+--- a/app/src/main/java/com/kingzcheung/xime/ui/keyboard/SymbolKeyboardLayout.kt
++++ b/app/src/main/java/com/kingzcheung/xime/ui/keyboard/SymbolKeyboardLayout.kt
+@@ -107,33 +107,6 @@
+             .background(backgroundColor)
+             .padding(outerPadding)
+     ) {
+-        // 导航区：返回按钮
+-        Box(
+-            modifier = Modifier
+-                .fillMaxWidth()
+-                .height(50.dp),
+-            contentAlignment = Alignment.CenterStart
+-        ) {
+-            Box(
+-                modifier = Modifier
+-                    .size(28.dp)
+-                    .clip(CircleShape)
+-                    .background(iconButtonContainer)
+-                    .tolerantClick {
+-                        onHapticFeedback?.invoke()
+-                        onBack()
+-                    },
+-                contentAlignment = Alignment.Center
+-            ) {
+-                Icon(
+-                    imageVector = Icons.Default.KeyboardArrowLeft,
+-                    contentDescription = "返回",
+-                    tint = textColor,
+-                    modifier = Modifier.size(24.dp)
+-                )
+-            }
+-        }
+-
+         // 内容区：符号网格 + HorizontalPager
+         Box(
+             modifier = Modifier
+@@ -197,7 +170,7 @@
+             }
+         }
+ 
+-        // 底部：分类 Tab + 删除按钮
++        // 底部：返回 + 分类 Tab + 删除按钮
+         Row(
+             modifier = Modifier
+                 .fillMaxWidth()
+@@ -205,6 +178,26 @@
+             horizontalArrangement = Arrangement.spacedBy(columnGap),
+             verticalAlignment = Alignment.CenterVertically
+         ) {
++            // ── 本地补丁：返回键挪到左下角（原先在顶部导航区，单手拇指够不着）──
++            Box(
++                modifier = Modifier
++                    .size(28.dp)
++                    .clip(CircleShape)
++                    .background(iconButtonContainer)
++                    .tolerantClick {
++                        onHapticFeedback?.invoke()
++                        onBack()
++                    },
++                contentAlignment = Alignment.Center
++            ) {
++                Icon(
++                    imageVector = Icons.Default.KeyboardArrowLeft,
++                    contentDescription = "返回",
++                    tint = textColor,
++                    modifier = Modifier.size(24.dp)
++                )
++            }
++
+             Row(
+                 modifier = Modifier
+                     .weight(1f)

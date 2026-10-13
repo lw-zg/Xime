@@ -196,7 +196,7 @@ jobs:
                    patch-base/KeyButton.kt patch-base/KeyboardTheme.kt \
                    patch-base/xime.yaml \
                    patch-base/ThemeSettingsScreen.kt patch-base/ThemeSettingsViewModel.kt \
-                   patch-base/SwipeBubble.kt; do
+                   patch-base/SwipeBubble.kt patch-base/SymbolKeyboardLayout.kt; do
             gh api -H "Accept: application/vnd.github.raw" "repos/$GITHUB_REPOSITORY/contents/$f?ref=main" > "$REF/$f"
           done
           echo "已取回："
@@ -204,7 +204,7 @@ jobs:
                 "$REF/patch-base/KeyboardLayout.kt" "$REF/patch-base/KeyButton.kt" \
                 "$REF/patch-base/KeyboardTheme.kt" "$REF/patch-base/xime.yaml" \
                 "$REF/patch-base/ThemeSettingsScreen.kt" "$REF/patch-base/ThemeSettingsViewModel.kt" \
-                "$REF/patch-base/SwipeBubble.kt"
+                "$REF/patch-base/SwipeBubble.kt" "$REF/patch-base/SymbolKeyboardLayout.kt"
 
       - name: 套用补丁（三方合并，自动适配上游改动）
         run: |
@@ -221,6 +221,7 @@ jobs:
           F6="app/src/main/java/com/kingzcheung/xime/ui/settings/ThemeSettingsScreen.kt"
           F7="app/src/main/java/com/kingzcheung/xime/viewmodel/ThemeSettingsViewModel.kt"
           F8="app/src/main/java/com/kingzcheung/xime/ui/keyboard/SwipeBubble.kt"
+          F9="app/src/main/java/com/kingzcheung/xime/ui/keyboard/SymbolKeyboardLayout.kt"
           N1="XimeInputMethodService.kt"
           N2="KeyboardLayout.kt"
           N3="KeyButton.kt"
@@ -229,6 +230,7 @@ jobs:
           N6="ThemeSettingsScreen.kt"
           N7="ThemeSettingsViewModel.kt"
           N8="SwipeBubble.kt"
+          N9="SymbolKeyboardLayout.kt"
 
           echo "── 1) 把补丁作用在 base 副本上，还原出「我们改完的版本」──"
           rm -rf "$RUNNER_TEMP/base" && mkdir -p "$RUNNER_TEMP/base"
@@ -243,6 +245,7 @@ jobs:
           cp "$BASE/$N6" "$F6"
           cp "$BASE/$N7" "$F7"
           cp "$BASE/$N8" "$F8"
+          cp "$BASE/$N9" "$F9"
           if ! git apply "$PATCH"; then
             echo "::error::补丁在本仓库保存的 base 文件上都套不上 —— patch-base/ 与 xime-flush-bottom.patch 不配对，请一起重新生成"
             exit 1
@@ -255,12 +258,13 @@ jobs:
           cp "$F6" "$RUNNER_TEMP/post-$N6"
           cp "$F7" "$RUNNER_TEMP/post-$N7"
           cp "$F8" "$RUNNER_TEMP/post-$N8"
-          echo "  ✓ base + 补丁 = 目标版本（各 $(wc -l < "$F1") / $(wc -l < "$F2") / $(wc -l < "$F3") / $(wc -l < "$F4") / $(wc -l < "$F5") / $(wc -l < "$F6") / $(wc -l < "$F7") / $(wc -l < "$F8") 行）"
+          cp "$F9" "$RUNNER_TEMP/post-$N9"
+          echo "  ✓ base + 补丁 = 目标版本（各 $(wc -l < "$F1") / $(wc -l < "$F2") / $(wc -l < "$F3") / $(wc -l < "$F4") / $(wc -l < "$F5") / $(wc -l < "$F6") / $(wc -l < "$F7") / $(wc -l < "$F8") / $(wc -l < "$F9") 行）"
 
           echo "── 2) 与上游最新代码做三方合并 ──"
           cd "$WS"
           CONFLICT=0
-          for pair in "$F1|$N1" "$F2|$N2" "$F3|$N3" "$F4|$N4" "$F5|$N5" "$F6|$N6" "$F7|$N7" "$F8|$N8"; do
+          for pair in "$F1|$N1" "$F2|$N2" "$F3|$N3" "$F4|$N4" "$F5|$N5" "$F6|$N6" "$F7|$N7" "$F8|$N8" "$F9|$N9"; do
             rel="${pair%%|*}"; n="${pair##*|}"
             if git merge-file -p -L "上游最新/$n" -L "改动前的原版/$n" -L "我们改完的/$n" \
                  "$WS/$rel" "$BASE/$n" "$RUNNER_TEMP/post-$n" > "$RUNNER_TEMP/merged-$n" 2>"$RUNNER_TEMP/merr-$n"; then
@@ -337,8 +341,16 @@ jobs:
           if ! grep -q -F '本地补丁：去掉按键气泡' "$WS/$F8"; then echo "::error::气泡补丁标记丢失"; fail=1; fi
           if ! grep -q -F 'if (!swipeState.isSwiping && !swipeState.isPressed && !swipeState.isLongPress) return null' "$WS/$F8"; then echo "::error::SwipeBubble 原有早退守卫被改坏"; fail=1; fi
           if ! grep -q -F 'fun DrawScope.drawSwipeBubble' "$WS/$F8"; then echo "::error::drawSwipeBubble 绘制函数不见了"; fail=1; fi
+          # SymbolKeyboardLayout.kt：全量符号浮层返回键从顶部导航区搬到左下角
+          if grep -q -F '// 导航区：返回按钮' "$WS/$F9"; then echo "::error::符号浮层顶部导航区还在（返回键没搬走）"; fail=1; fi
+          if ! grep -q -F '本地补丁：返回键挪到左下角' "$WS/$F9"; then echo "::error::符号浮层左下角返回键丢失"; fail=1; fi
+          c10=$(grep -c -F 'contentDescription = "返回"' "$WS/$F9" || true)
+          if [ "$c10" != "1" ]; then echo "::error::符号浮层返回键应只剩 1 处（搬移不是复制），实际 $c10 处"; fail=1; fi
+          c11=$(grep -c -F 'onBack()' "$WS/$F9" || true)
+          if [ "$c11" != "1" ]; then echo "::error::符号浮层 onBack() 调用应只剩 1 处，实际 $c11 处"; fail=1; fi
+          if ! grep -q -F '// 底部：返回 + 分类 Tab + 删除按钮' "$WS/$F9"; then echo "::error::符号浮层底部行注释没更新"; fail=1; fi
           if [ "$fail" != "0" ]; then exit 1; fi
-          echo "  ✓ 两处 38dp 阈值 + 去掉 18dp 兜底 + 键区内边距归零 + 底排外侧圆角 + 滑键改判（误触修复） + 无键帽全局开关（含按键边框）+ 主题设置页开关 + 内置方案市场镜像索引 + ？↔％ 互换 + 去掉按键气泡，全部到位"
+          echo "  ✓ 两处 38dp 阈值 + 去掉 18dp 兜底 + 键区内边距归零 + 底排外侧圆角 + 滑键改判（误触修复） + 无键帽全局开关（含按键边框）+ 主题设置页开关 + 内置方案市场镜像索引 + ？↔％ 互换 + 去掉按键气泡 + 符号浮层返回键挪左下角，全部到位"
           echo "── 相对上游的最终改动 ──"
           git --no-pager diff --stat
 
@@ -358,7 +370,8 @@ jobs:
           F6="app/src/main/java/com/kingzcheung/xime/ui/settings/ThemeSettingsScreen.kt"
           F7="app/src/main/java/com/kingzcheung/xime/viewmodel/ThemeSettingsViewModel.kt"
           F8="app/src/main/java/com/kingzcheung/xime/ui/keyboard/SwipeBubble.kt"
-          python3 - "$F1" "$F2" "$F3" "$F4" "$F6" "$F7" "$F8" <<'PYEOF'
+          F9="app/src/main/java/com/kingzcheung/xime/ui/keyboard/SymbolKeyboardLayout.kt"
+          python3 - "$F1" "$F2" "$F3" "$F4" "$F6" "$F7" "$F8" "$F9" <<'PYEOF'
           import sys
 
           def blank_noncode(text):
@@ -829,7 +842,7 @@ jobs:
             KIND="debug"
             SIGN="调试密钥（每次构建可能不同）—— 更新前需要先卸载"
           fi
-          NOTES=$(printf '跟随上游 ximeiorg/Xime 自动构建的「键盘底部贴底」补丁版。\n\n<!-- upstream-release: %s -->\n<!-- upstream-ref: %s -->\n<!-- upstream-sha: %s -->\n\n- 触发 release: `%s`\n- 上游版本: `%s`（versionCode %s，%s 轨道）\n- 上游源码引用: `%s`（有新 commit 即随 main 拉取）\n- 上游 commit: `%s`\n- 构建类型: %s\n- 目标架构: 仅 `%s`（现代手机适用；其他架构请改工作流的 TARGET_ABI）\n- 补丁: 手势导航下键区贴到屏幕底边（inset ≤ 38dp 不留白；三键导航仍避让）\n- 误触修复: 拇指指腹先触发的行不再抢先输出——松手时按手指最终落点改判按键；上滑/长按/光标手势不受影响\n- 无键帽模式: 主题设置里新增总开关，**对所有主题生效**；开启后键面不显示底色（透明），改画 1dp 按键边框标示键位，按下/高亮时给出提示；关闭后各主题观感不变\n- 键位调整: qwerty / qwerty_en / qwerty_tablet / qwerty_en_tablet 四个键盘段的 **v 键上滑与 n 键上滑对调（？ ↔ ％）**\n- 按键气泡: 按压气泡与上滑/下滑提示气泡已**去掉**（主键盘/面板/T9/笔画通用）；长按选择弹窗保留——它承担滑动挑选变体的视觉反馈，去掉会长按选字变成盲选\n- 内置方案市场: `assets/xime.yaml` 的 `base_urls` 顶部加入自建镜像（含 **oh-my-rime 薄荷拼音**等额外方案，可在「输入方案」里一键下载安装）；官方镜像保留作后备\n- 融合方式: 三方合并（自动适配上游改动），冲突时构建会失败并给出冲突片段\n- 包名: com.kingzcheung.xime —— 与官方同包名，首次安装前必须先卸载官方版\n- 签名: %s\n- sha256: `%s`\n- 大小: %s 字节\n- 资产: %s（带版本号）/ %s（稳定别名，永久链接不变）\n- 构建记录: https://github.com/%s/actions\n' "$UP_REL" "$UP_REF" "$UP" "$UP_REL" "$UP_VER" "${UP_VC:-?}" "$UP_MODE" "$UP_REF" "$SHORT" "$KIND" "$TARGET_ABI" "$SIGN" "$SHA256" "$SIZE" "$OUT" "$ALIAS" "$GITHUB_REPOSITORY")
+          NOTES=$(printf '跟随上游 ximeiorg/Xime 自动构建的「键盘底部贴底」补丁版。\n\n<!-- upstream-release: %s -->\n<!-- upstream-ref: %s -->\n<!-- upstream-sha: %s -->\n\n- 触发 release: `%s`\n- 上游版本: `%s`（versionCode %s，%s 轨道）\n- 上游源码引用: `%s`（有新 commit 即随 main 拉取）\n- 上游 commit: `%s`\n- 构建类型: %s\n- 目标架构: 仅 `%s`（现代手机适用；其他架构请改工作流的 TARGET_ABI）\n- 补丁: 手势导航下键区贴到屏幕底边（inset ≤ 38dp 不留白；三键导航仍避让）\n- 误触修复: 拇指指腹先触发的行不再抢先输出——松手时按手指最终落点改判按键；上滑/长按/光标手势不受影响\n- 无键帽模式: 主题设置里新增总开关，**对所有主题生效**；开启后键面不显示底色（透明），改画 1dp 按键边框标示键位，按下/高亮时给出提示；关闭后各主题观感不变\n- 键位调整: qwerty / qwerty_en / qwerty_tablet / qwerty_en_tablet 四个键盘段的 **v 键上滑与 n 键上滑对调（？ ↔ ％）**\n- 按键气泡: 按压气泡与上滑/下滑提示气泡已**去掉**（主键盘/面板/T9/笔画通用）；长按选择弹窗保留——它承担滑动挑选变体的视觉反馈，去掉会长按选字变成盲选\n- 符号页返回键: 全量符号浮层的返回键从**左上角**挪到**左下角**（底部行行首，圆形 ← 外观与行为不变），单手拇指更够得着；分类 Tab 与删除键位置不变\n- 内置方案市场: `assets/xime.yaml` 的 `base_urls` 顶部加入自建镜像（含 **oh-my-rime 薄荷拼音**等额外方案，可在「输入方案」里一键下载安装）；官方镜像保留作后备\n- 融合方式: 三方合并（自动适配上游改动），冲突时构建会失败并给出冲突片段\n- 包名: com.kingzcheung.xime —— 与官方同包名，首次安装前必须先卸载官方版\n- 签名: %s\n- sha256: `%s`\n- 大小: %s 字节\n- 资产: %s（带版本号）/ %s（稳定别名，永久链接不变）\n- 构建记录: https://github.com/%s/actions\n' "$UP_REL" "$UP_REF" "$UP" "$UP_REL" "$UP_VER" "${UP_VC:-?}" "$UP_MODE" "$UP_REF" "$SHORT" "$KIND" "$TARGET_ABI" "$SIGN" "$SHA256" "$SIZE" "$OUT" "$ALIAS" "$GITHUB_REPOSITORY")
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes "$NOTES"
           else
