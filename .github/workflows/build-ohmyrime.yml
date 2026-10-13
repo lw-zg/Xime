@@ -1,0 +1,217 @@
+# 把 oh-my-rime（薄荷拼音等）打包成 Xime「输入方案」市场可下载安装的方案包，
+# 并刷新一份自建索引镜像分支（官方索引 + 追加我们的方案条目）。
+#
+# ── 为什么这么做 ─────────────────────────────────────────────────────
+# Xime 的方案市场是**静态索引**：App 从 xime.yaml 的 xime_index.base_urls 依次取
+#   <base>rimes/index.yaml
+# 拿到方案列表（含 downloadUrl + sha256），再按 sha256 下载校验。
+# 官方索引由 ximeiorg/xime-index 生成、托管在 index.ximei.me / jsDelivr。
+# 我们不改上游，而是：
+#   1) 把 oh-my-rime 打成 zip，发到本仓库固定 Release 标签（固定资源名，便于长期引用）；
+#   2) 从官方索引拉取全部子索引做**全量镜像**，在 rimes/index.yaml 末尾追加上
+#      oh-my-rime 条目，推到一个独立分支（默认 xime-index）；
+#   3) 补丁版 APK 把镜像地址内置进 xime.yaml 的 base_urls 顶部（官方镜像保留作后备），
+#      于是 App 里「输入方案」市场就能看到并一键安装 oh-my-rime。
+#
+# ── 打包取舍 ─────────────────────────────────────────────────────────
+# 只保留 Rime 运行需要的文件（根级 *.yaml/*.lua + dicts/ lua/ opencc/），剔除
+# .github/.ide/preview/plum/tools/README 等；**不修改任何 Rime 配置内容**（App 首次
+# 部署时自行编译 .bin）。附上游 LICENSE 与来源说明以满足合规。
+name: Package oh-my-rime scheme & refresh index mirror
+
+on:
+  schedule:
+    - cron: '0 18 * * *'          # 每天 02:00（北京时间）
+  workflow_dispatch:
+    inputs:
+      force:
+        description: '即使 oh-my-rime 无新提交也强制重新打包发布'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ohmyrime-package
+  cancel-in-progress: false
+
+env:
+  OMR_REPO: Mintimate/oh-my-rime
+  OMR_REF: main
+  SCHEME_ID: oh-my-rime
+  REL_TAG: oh-my-rime-scheme
+  ASSET: oh-my-rime.zip
+  IDX_BRANCH: xime-index
+  OFFICIAL_BASE: https://index.ximei.me/
+
+jobs:
+  pack:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 读取 oh-my-rime 最新提交与上次打包记录
+        id: decide
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          SHA=$(git ls-remote "https://github.com/$OMR_REPO.git" "refs/heads/$OMR_REF" | cut -f1)
+          [ -n "$SHA" ] || { echo "::error::无法读取 $OMR_REPO@$OMR_REF"; exit 1; }
+          LAST=$(gh release view "$REL_TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body 2>/dev/null \
+                 | grep -o 'omr-sha: [0-9a-f]\{40\}' | head -1 | cut -d' ' -f2 || true)
+          echo "oh-my-rime $OMR_REF = $SHA"
+          echo "上次打包 = ${LAST:-<无记录>}"
+          echo "omr_sha=$SHA" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event.inputs.force }}" = "true" ] || [ "$SHA" != "$LAST" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "oh-my-rime 无新提交：跳过重新打包（索引镜像仍会刷新）"
+          fi
+
+      - name: 检出 oh-my-rime
+        if: steps.decide.outputs.changed == 'true'
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.OMR_REPO }}
+          ref: ${{ env.OMR_REF }}
+          path: omr
+
+      - name: 打包方案（只留 Rime 运行所需文件）
+        id: mk
+        if: steps.decide.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          VER=$(date -u +%Y.%m.%d)
+          STAGE="$RUNNER_TEMP/stage"
+          rm -rf "$STAGE" && mkdir -p "$STAGE"
+          rsync -a --prune-empty-dirs \
+            --exclude '.git' --exclude '.github' --exclude '.ide' --exclude '.vscode' \
+            --exclude 'preview' --exclude 'plum' --exclude 'tools' \
+            --exclude 'README*' --exclude 'demo.webp' --exclude '.cnb.yml' --exclude '.gitignore' \
+            omr/ "$STAGE/"
+          cp -f omr/LICENSE "$STAGE/LICENSE-oh-my-rime.txt" 2>/dev/null || true
+          cat > "$STAGE/OH-MY-RIME-SOURCE.txt" <<EOF
+          本包由 GitHub Actions 从 https://github.com/$OMR_REPO 打包（仅做文件筛选，未改动任何 Rime 配置）。
+          上游提交: ${{ steps.decide.outputs.omr_sha }}
+          打包日期: $VER
+          许可证  : 见 LICENSE-oh-my-rime.txt
+          EOF
+          N=$(find "$STAGE" -type f | wc -l)
+          echo "包内文件数：$N"
+          find "$STAGE" -maxdepth 1 -type d -printf '  [dir] %f\n' | sort
+          ( cd "$STAGE" && zip -qr "$RUNNER_TEMP/$ASSET" . )
+          OUT="$RUNNER_TEMP/$ASSET"
+          SHA256=$(sha256sum "$OUT" | cut -d' ' -f1)
+          SIZE=$(stat -c%s "$OUT")
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+          echo "size_bytes=$SIZE" >> "$GITHUB_OUTPUT"
+          echo "打包完成：oh-my-rime $VER · $SIZE 字节 · sha256=$SHA256"
+
+      - name: 发布方案包到固定 Release 标签
+        if: steps.decide.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VER: ${{ steps.mk.outputs.version }}
+          SHA256: ${{ steps.mk.outputs.sha256 }}
+          SIZE: ${{ steps.mk.outputs.size_bytes }}
+          OMR_SHA: ${{ steps.decide.outputs.omr_sha }}
+        run: |
+          set -e
+          HUMAN=$(numfmt --to=iec --suffix=B --format='%.1f' "$SIZE")
+          NOTES=$(printf '由 lw-zg/Xime 流水线自动打包的 oh-my-rime（薄荷拼音）Xime 输入方案包。\n\n<!-- omr-sha: %s -->\n\n- 上游: https://github.com/%s @ `%s`\n- 版本: %s\n- 内容: Rime 配置（*.schema.yaml + *.dict.yaml + dicts/ + lua/ + opencc/），未做任何修改\n- sha256: `%s`\n- 大小: %s（%s 字节）\n- 说明: App 首次部署时会自行编译 .bin；无需预编译产物\n' "$OMR_SHA" "$OMR_REPO" "$OMR_SHA" "$VER" "$SHA256" "$HUMAN" "$SIZE")
+          if gh release view "$REL_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$REL_TAG" --repo "$GITHUB_REPOSITORY" --notes "$NOTES"
+          else
+            gh release create "$REL_TAG" --repo "$GITHUB_REPOSITORY" \
+              --title "oh-my-rime 输入方案包（自动跟随上游）" --notes "$NOTES" --prerelease
+          fi
+          gh release upload "$REL_TAG" "$RUNNER_TEMP/$ASSET" --repo "$GITHUB_REPOSITORY" --clobber
+          echo "已发布: https://github.com/$GITHUB_REPOSITORY/releases/download/$REL_TAG/$ASSET"
+
+      - name: 刷新自建索引镜像分支（官方全量 + oh-my-rime 条目）
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # 元数据只认 Release（无论本次是否重新打包，都以发布物为准）
+          BODY=$(gh release view "$REL_TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body)
+          SHA256=$(printf '%s\n' "$BODY" | grep -o 'sha256: `[0-9a-f]\{64\}`' | head -1 | sed 's/sha256: `//; s/`//')
+          VER=$(printf '%s\n' "$BODY" | grep -oE '版本: [0-9]{4}\.[0-9]{2}\.[0-9]{2}' | head -1 | awk '{print $2}')
+          SIZE=$(gh release view "$REL_TAG" --repo "$GITHUB_REPOSITORY" --json assets \
+                 --jq '.assets[] | select(.name=="'"$ASSET"'") | .size')
+          [ -n "$SHA256" ] && [ -n "$VER" ] && [ -n "$SIZE" ] || { echo "::error::Release 元数据不完整"; exit 1; }
+          HUMAN=$(numfmt --to=iec --suffix=B --format='%.1f' "$SIZE")
+          echo "索引条目：oh-my-rime $VER · $SIZE 字节 · sha256=$SHA256"
+
+          D="$RUNNER_TEMP/mirror"
+          rm -rf "$D" && mkdir -p "$D/rimes" "$D/plugins/v2" "$D/layouts" "$D/models" "$D/extras"
+          for f in index.yaml rimes/index.yaml plugins/index.yaml plugins/v2/index.yaml layouts/index.yaml models/index.yaml; do
+            if curl -fsS --retry 3 --max-time 60 "$OFFICIAL_BASE$f" -o "$D/$f"; then
+              echo "  镜像 OK  $f（$(wc -c < "$D/$f") 字节）"
+            else
+              echo "::warning::官方索引 $f 拉取失败，跳过（App 会回退到官方镜像）"
+              rm -f "$D/$f"
+            fi
+          done
+          [ -s "$D/rimes/index.yaml" ] || { echo "::error::官方 rimes/index.yaml 拉取失败，无法生成镜像"; exit 1; }
+
+          DL="https://github.com/$GITHUB_REPOSITORY/releases/download/$REL_TAG/$ASSET"
+          cat >> "$D/rimes/index.yaml" <<EOF
+          # ── 以下条目由 lw-zg/Xime 的 build-ohmyrime.yml 追加（勿手动编辑上游部分）──
+          - id: $SCHEME_ID
+            name: 薄荷拼音（oh-my-rime）
+            author: Mintimate
+            description: oh-my-rime 是由 Mintimate 维护的 Rime 配置模板：薄荷拼音为主方案，另含小鹤/自然码等双拼、五笔 86/98、地球拼音、笔画、九宫格，自带 Lua 功能（计算器、农历、时间、金额大写、Unicode 等）。
+            type: remote
+            tags:
+            - 拼音
+            - 双拼
+            - 五笔
+            - 九宫格
+            homepage: https://github.com/$OMR_REPO
+            appVersion: '>=3.0.0'
+            currentVersion: $VER
+            versions:
+            - version: $VER
+              date: '$(date -u +%Y-%m-%d)'
+              changelog: 跟随上游 ${{ steps.decide.outputs.omr_sha }}
+              downloadUrl:
+              - url: $DL
+                sha256: $SHA256
+                size: $HUMAN
+                sizeBytes: $SIZE
+          EOF
+          echo "已追加 oh-my-rime 条目到镜像 rimes/index.yaml"
+
+          # 备用：手动把别的安装指向本镜像（用户已在 APK 内置，一般用不到）
+          CDN="https://cdn.jsdelivr.net/gh/$GITHUB_REPOSITORY@$IDX_BRANCH/"
+          FASTLY="https://fastly.jsdelivr.net/gh/$GITHUB_REPOSITORY@$IDX_BRANCH/"
+          RAW="https://raw.githubusercontent.com/$GITHUB_REPOSITORY/refs/heads/$IDX_BRANCH/"
+          cat > "$D/extras/xime.custom.yaml" <<EOF
+          # 把方案/插件/模型市场指向本仓库的镜像（官方镜像保留作后备）
+          xime_index:
+            base_urls:
+              - "$CDN"
+              - "$FASTLY"
+              - "$RAW"
+              - "https://cdn.jsdelivr.net/gh/ximeiorg/xime-index@master/"
+              - "https://fastly.jsdelivr.net/gh/ximeiorg/xime-index@master/"
+              - "https://index.ximei.me/"
+          EOF
+
+          # ── 推送到镜像分支（内容整体替换，故 force）──
+          cd "$D"
+          git init -q .
+          git config user.email "actions@users.noreply.github.com"
+          git config user.name "xime-index-bot"
+          git checkout -q -b "$IDX_BRANCH"
+          git add -A
+          git commit -q -m "mirror: 官方 xime-index + oh-my-rime $VER"
+          git push -q --force \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$IDX_BRANCH"
+          echo "镜像分支已更新：$IDX_BRANCH"
+          echo "  索引基址: $CDN"
+          echo "  方案地址: $DL"
