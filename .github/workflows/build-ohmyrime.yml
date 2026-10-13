@@ -45,7 +45,10 @@ env:
   OMR_REF: main
   SCHEME_ID: oh-my-rime
   REL_TAG: oh-my-rime-scheme
-  ASSET: oh-my-rime.zip
+  # 资产名带版本号：`oh-my-rime-<YYYY.MM.DD>.zip`。每次打包都是**新文件、永不覆盖**，
+  # 于是索引里写死的 sha256 永远能对上（彻底消除 --clobber 覆盖旧文件造成的校验失败）。
+  # 历史遗留的 `oh-my-rime.zip`（首次打包那份）保持原样不动，老索引条目依然有效。
+  ASSET_PREFIX: oh-my-rime
   IDX_BRANCH: xime-index
   OFFICIAL_BASE: https://index.ximei.me/
 
@@ -87,6 +90,7 @@ jobs:
         run: |
           set -euo pipefail
           VER=$(date -u +%Y.%m.%d)
+          ASSET="${ASSET_PREFIX}-${VER}.zip"
           STAGE="$RUNNER_TEMP/stage"
           rm -rf "$STAGE" && mkdir -p "$STAGE"
           rsync -a --prune-empty-dirs \
@@ -108,15 +112,18 @@ jobs:
           OUT="$RUNNER_TEMP/$ASSET"
           SHA256=$(sha256sum "$OUT" | cut -d' ' -f1)
           SIZE=$(stat -c%s "$OUT")
+          echo "asset=$ASSET" >> "$GITHUB_OUTPUT"
           echo "version=$VER" >> "$GITHUB_OUTPUT"
           echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
           echo "size_bytes=$SIZE" >> "$GITHUB_OUTPUT"
-          echo "打包完成：oh-my-rime $VER · $SIZE 字节 · sha256=$SHA256"
+          echo "打包完成：$ASSET · $SIZE 字节 · sha256=$SHA256"
 
       - name: 发布方案包到固定 Release 标签
+        id: publish
         if: steps.decide.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ASSET: ${{ steps.mk.outputs.asset }}
           VER: ${{ steps.mk.outputs.version }}
           SHA256: ${{ steps.mk.outputs.sha256 }}
           SIZE: ${{ steps.mk.outputs.size_bytes }}
@@ -124,15 +131,21 @@ jobs:
         run: |
           set -e
           HUMAN=$(numfmt --to=iec --suffix=B --format='%.1f' "$SIZE")
-          NOTES=$(printf '由 lw-zg/Xime 流水线自动打包的 oh-my-rime（薄荷拼音）Xime 输入方案包。\n\n<!-- omr-sha: %s -->\n\n- 上游: https://github.com/%s @ `%s`\n- 版本: %s\n- 内容: Rime 配置（*.schema.yaml + *.dict.yaml + dicts/ + lua/ + opencc/），未做任何修改\n- sha256: `%s`\n- 大小: %s（%s 字节）\n- 说明: App 首次部署时会自行编译 .bin；无需预编译产物\n' "$OMR_SHA" "$OMR_REPO" "$OMR_SHA" "$VER" "$SHA256" "$HUMAN" "$SIZE")
+          NOTES=$(printf '由 lw-zg/Xime 流水线自动打包的 oh-my-rime（薄荷拼音）Xime 输入方案包。\n\n<!-- omr-sha: %s -->\n\n- 上游: https://github.com/%s @ `%s`\n- 版本: %s\n- 资产: %s\n- 内容: Rime 配置（*.schema.yaml + *.dict.yaml + dicts/ + lua/ + opencc/），未做任何修改\n- sha256: `%s`\n- 大小: %s（%s 字节）\n- 说明: App 首次部署时会自行编译 .bin；无需预编译产物。资产名带版本号，历史版本不会被覆盖，旧索引条目长期有效。\n' "$OMR_SHA" "$OMR_REPO" "$OMR_SHA" "$VER" "$ASSET" "$SHA256" "$HUMAN" "$SIZE")
+          # 先上传、后写 notes：保证 notes 里记录的版本/资产/sha256 一定对应「已成功发布」的那一份
           if gh release view "$REL_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$REL_TAG" "$RUNNER_TEMP/$ASSET" --repo "$GITHUB_REPOSITORY" --clobber
             gh release edit "$REL_TAG" --repo "$GITHUB_REPOSITORY" --notes "$NOTES"
           else
             gh release create "$REL_TAG" --repo "$GITHUB_REPOSITORY" \
               --title "oh-my-rime 输入方案包（自动跟随上游）" --notes "$NOTES" --prerelease
+            gh release upload "$REL_TAG" "$RUNNER_TEMP/$ASSET" --repo "$GITHUB_REPOSITORY"
           fi
-          gh release upload "$REL_TAG" "$RUNNER_TEMP/$ASSET" --repo "$GITHUB_REPOSITORY" --clobber
           echo "已发布: https://github.com/$GITHUB_REPOSITORY/releases/download/$REL_TAG/$ASSET"
+          {
+            echo "asset=$ASSET"
+            echo "version=$VER"
+          } >> "$GITHUB_OUTPUT"
 
       - name: 刷新自建索引镜像分支（官方全量 + oh-my-rime 条目）
         env:
@@ -143,11 +156,14 @@ jobs:
           BODY=$(gh release view "$REL_TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body)
           SHA256=$(printf '%s\n' "$BODY" | grep -o 'sha256: `[0-9a-f]\{64\}`' | head -1 | sed 's/sha256: `//; s/`//')
           VER=$(printf '%s\n' "$BODY" | grep -oE '版本: [0-9]{4}\.[0-9]{2}\.[0-9]{2}' | head -1 | awk '{print $2}')
+          # 资产名从 notes 里读（版本化命名）；老 notes 没这行时退回历史遗留的固定名
+          ASSET=$(printf '%s\n' "$BODY" | grep -oE '资产: [^ ]+\.zip' | head -1 | awk '{print $2}')
+          [ -n "$ASSET" ] || ASSET="${ASSET_PREFIX}.zip"
           SIZE=$(gh release view "$REL_TAG" --repo "$GITHUB_REPOSITORY" --json assets \
                  --jq '.assets[] | select(.name=="'"$ASSET"'") | .size')
-          [ -n "$SHA256" ] && [ -n "$VER" ] && [ -n "$SIZE" ] || { echo "::error::Release 元数据不完整"; exit 1; }
+          [ -n "$SHA256" ] && [ -n "$VER" ] && [ -n "$SIZE" ] || { echo "::error::Release 元数据不完整（asset=$ASSET sha=$SHA256 ver=$VER size=$SIZE）"; exit 1; }
           HUMAN=$(numfmt --to=iec --suffix=B --format='%.1f' "$SIZE")
-          echo "索引条目：oh-my-rime $VER · $SIZE 字节 · sha256=$SHA256"
+          echo "索引条目：$ASSET · oh-my-rime $VER · $SIZE 字节 · sha256=$SHA256"
 
           D="$RUNNER_TEMP/mirror"
           rm -rf "$D" && mkdir -p "$D/rimes" "$D/plugins/v2" "$D/layouts" "$D/models" "$D/extras"

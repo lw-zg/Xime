@@ -15,6 +15,8 @@
 # 默认构建 **release**（R8 精简 + 资源压缩），且只打包 **arm64-v8a**，用**固定密钥**签名：
 #   · release   -> Release 标签 `patched-apk`        （永久链接，可覆盖安装升级）
 #   · debug     -> Release 标签 `patched-apk-debug`  （手动触发时的备用路径）
+# 资产名带上游版本号（`xime-patched-release-3.1.0-arm64-v8a.apk`），同时保留一个不带版本号的
+# **稳定别名**（`xime-patched-release-arm64-v8a.apk`）—— 永久链接始终指向最新版，不会因改名失效。
 # 只取 arm64-v8a 一个架构：现代手机都是它，能省掉另外 3 份 native 库（约 35 MB×3）。
 # ⚠ 曾经踩过的坑：以前用 `find ... | head -1` 随手取一个 APK，结果发布出去的是 **x86_64**
 #   那一份（真机装上去加载不到 librime 会崩）。现在改成按 TARGET_ABI 明确挑选，
@@ -164,6 +166,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       url: ${{ steps.publish.outputs.url }}
+      url_v: ${{ steps.publish.outputs.url_v }}
       sha: ${{ steps.publish.outputs.sha }}
       sha256: ${{ steps.publish.outputs.sha256 }}
       size: ${{ steps.publish.outputs.size }}
@@ -558,8 +561,13 @@ jobs:
         run: |
           set -e
           APK="${{ steps.pick.outputs.apk }}"
-          OUT="xime-patched-${VARIANT}-${TARGET_ABI}.apk"
+          # 版本号可能带空格/斜杠等，先净化成文件名安全的形态
+          VER_SAFE=$(printf '%s' "${UP_VER:-unknown}" | sed -E 's/[^A-Za-z0-9._-]+/-/g; s/^-+//; s/-+$//')
+          [ -n "$VER_SAFE" ] || VER_SAFE=unknown
+          OUT="xime-patched-${VARIANT}-${VER_SAFE}-${TARGET_ABI}.apk"   # 带版本号，一看就知道是哪一版
+          ALIAS="xime-patched-${VARIANT}-${TARGET_ABI}.apk"             # 稳定别名：永久链接始终指向最新版
           cp "$APK" "$OUT"
+          cp "$APK" "$ALIAS"
           UP=$(git rev-parse HEAD)
           SHORT=$(git rev-parse --short HEAD)
           SHA256=$(sha256sum "$OUT" | cut -d' ' -f1)
@@ -573,7 +581,7 @@ jobs:
             KIND="debug"
             SIGN="调试密钥（每次构建可能不同）—— 更新前需要先卸载"
           fi
-          NOTES=$(printf '跟随上游 ximeiorg/Xime 自动构建的「键盘底部贴底」补丁版。\n\n<!-- upstream-release: %s -->\n<!-- upstream-ref: %s -->\n<!-- upstream-sha: %s -->\n\n- 触发 release: `%s`\n- 上游版本: `%s`（versionCode %s，%s 轨道）\n- 上游源码引用: `%s`（有新 commit 即随 main 拉取）\n- 上游 commit: `%s`\n- 构建类型: %s\n- 目标架构: 仅 `%s`（现代手机适用；其他架构请改工作流的 TARGET_ABI）\n- 补丁: 手势导航下键区贴到屏幕底边（inset ≤ 38dp 不留白；三键导航仍避让）\n- 新增主题: 「无键帽」——键面不显示底色（透明），仅按下/高亮时给出提示；在主题里选中才生效，其它主题观感不变\n- 内置方案市场: `assets/xime.yaml` 的 `base_urls` 顶部加入自建镜像（含 **oh-my-rime 薄荷拼音**等额外方案，可在「输入方案」里一键下载安装）；官方镜像保留作后备\n- 融合方式: 三方合并（自动适配上游改动），冲突时构建会失败并给出冲突片段\n- 包名: com.kingzcheung.xime —— 与官方同包名，首次安装前必须先卸载官方版\n- 签名: %s\n- sha256: `%s`\n- 大小: %s 字节\n- 构建记录: https://github.com/%s/actions\n' "$UP_REL" "$UP_REF" "$UP" "$UP_REL" "$UP_VER" "${UP_VC:-?}" "$UP_MODE" "$UP_REF" "$SHORT" "$KIND" "$TARGET_ABI" "$SIGN" "$SHA256" "$SIZE" "$GITHUB_REPOSITORY")
+          NOTES=$(printf '跟随上游 ximeiorg/Xime 自动构建的「键盘底部贴底」补丁版。\n\n<!-- upstream-release: %s -->\n<!-- upstream-ref: %s -->\n<!-- upstream-sha: %s -->\n\n- 触发 release: `%s`\n- 上游版本: `%s`（versionCode %s，%s 轨道）\n- 上游源码引用: `%s`（有新 commit 即随 main 拉取）\n- 上游 commit: `%s`\n- 构建类型: %s\n- 目标架构: 仅 `%s`（现代手机适用；其他架构请改工作流的 TARGET_ABI）\n- 补丁: 手势导航下键区贴到屏幕底边（inset ≤ 38dp 不留白；三键导航仍避让）\n- 新增主题: 「无键帽」——键面不显示底色（透明），仅按下/高亮时给出提示；在主题里选中才生效，其它主题观感不变\n- 内置方案市场: `assets/xime.yaml` 的 `base_urls` 顶部加入自建镜像（含 **oh-my-rime 薄荷拼音**等额外方案，可在「输入方案」里一键下载安装）；官方镜像保留作后备\n- 融合方式: 三方合并（自动适配上游改动），冲突时构建会失败并给出冲突片段\n- 包名: com.kingzcheung.xime —— 与官方同包名，首次安装前必须先卸载官方版\n- 签名: %s\n- sha256: `%s`\n- 大小: %s 字节\n- 资产: %s（带版本号）/ %s（稳定别名，永久链接不变）\n- 构建记录: https://github.com/%s/actions\n' "$UP_REL" "$UP_REF" "$UP" "$UP_REL" "$UP_VER" "${UP_VC:-?}" "$UP_MODE" "$UP_REF" "$SHORT" "$KIND" "$TARGET_ABI" "$SIGN" "$SHA256" "$SIZE" "$OUT" "$ALIAS" "$GITHUB_REPOSITORY")
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes "$NOTES"
           else
@@ -584,11 +592,13 @@ jobs:
           REL_ID=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json databaseId --jq .databaseId)
           gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$REL_ID" -f name="$TITLE" >/dev/null
           echo "标题已更新为: $TITLE"
-          gh release upload "$TAG" "$OUT" --repo "$GITHUB_REPOSITORY" --clobber
-          echo "已发布: https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG"
-          echo "永久链接: https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$OUT"
+          # 两个名字一起上传：版本号版便于识别，别名版保证既有的永久下载链接继续可用
+          gh release upload "$TAG" "$OUT" "$ALIAS" --repo "$GITHUB_REPOSITORY" --clobber
+          echo "已发布: https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$OUT"
+          echo "稳定别名: https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$ALIAS"
           {
-            echo "url=https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$OUT"
+            echo "url=https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$ALIAS"
+            echo "url_v=https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$OUT"
             echo "sha=$SHORT"
             echo "sha256=$SHA256"
             echo "size=$SIZE"
@@ -632,5 +642,8 @@ jobs:
 
             永久下载链接（固定，覆盖安装即可升级，不丢 Rime 数据）:
             ${{ needs.build.outputs.url }}
+
+            带版本号的下载链接:
+            ${{ needs.build.outputs.url_v }}
 
             —— 由 fork lw-zg/Xime 的 build-patched.yml 自动发出
