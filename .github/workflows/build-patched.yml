@@ -579,6 +579,11 @@ jobs:
           else
             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TITLE" --notes "$NOTES" --prerelease
           fi
+          # gh release edit 只改 notes、**不改标题**（标题只在 create 时设）→ 显式 PATCH 一次，
+          # 否则历史 release 的标题会一直停留在旧版本号上。
+          REL_ID=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json databaseId --jq .databaseId)
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$REL_ID" -f name="$TITLE" >/dev/null
+          echo "标题已更新为: $TITLE"
           gh release upload "$TAG" "$OUT" --repo "$GITHUB_REPOSITORY" --clobber
           echo "已发布: https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG"
           echo "永久链接: https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$OUT"
