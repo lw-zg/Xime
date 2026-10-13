@@ -181,7 +181,7 @@ jobs:
         with:
           repository: ximeiorg/Xime
           ref: ${{ needs.check.outputs.ref }}
-          fetch-depth: 0
+          fetch-depth: 1
           submodules: recursive
 
       - name: 取回补丁与基准文件（它们在本 fork 的 main 上，不在上游代码树里）
@@ -644,12 +644,24 @@ jobs:
           path: |
             app/src/main/jni/onnxruntime
             app/src/main/jniLibs/**/libonnxruntime.so
+            app/build/onnxruntime-android-*.aar
+            app/build/onnxruntime-aar
           key: native-${{ runner.os }}-${{ hashFiles('app/build-logic/tasks-native.gradle.kts') }}
           restore-keys: |
             native-${{ runner.os }}-
 
       - name: Download native deps (ONNX Runtime)
-        run: ./gradlew downloadOnnx --no-daemon --refresh-dependencies
+        # 该任务自带「4 个 ABI 的 .so + 头文件齐备即跳过」的守卫，且 AAR 已存在时也会跳过下载；
+        # 但只要真的需要联网，它就会按镜像逐个重试，而单个连接的读超时是 10 分钟
+        # → 网络不佳时这一步能挂住半小时以上（run #19 即卡死在此 30+ 分钟，最后只能取消）。
+        # 故：① 去掉 --refresh-dependencies（不强制联网复核依赖元数据，让它安心用缓存）；
+        #     ② 上面额外缓存已下好的 AAR，缓存命中时连解压都走本地、完全不碰网络；
+        #     ③ 套一层 timeout 兜底：真下不动就快速失败，而不是无限期占着 runner。
+        run: |
+          timeout 900 ./gradlew downloadOnnx --no-daemon || {
+            echo "::error::下载 ONNX Runtime 失败或超过 15 分钟超时 —— 检查 runner 到 Maven Central / 镜像源的连通性。"
+            exit 1
+          }
 
       - name: Cache CMake build
         uses: actions/cache@v6
@@ -707,6 +719,49 @@ jobs:
           echo "已写入 app/keystore.properties（$(( $(wc -c < app/keystore.properties) )) 字节，不入库）"
           git status --porcelain app/keystore.properties || true
 
+      - name: ABI 收窄 init 脚本（CI 只编 ${{ env.TARGET_ABI }}，跳过其余 3 个 ABI 的 native 编译）
+        # 上游 defaultConfig.ndk.abiFilters 与 splits.abi 都列了 4 个 ABI，
+        # 而本工作流只发布 arm64-v8a → 另外 3 个 ABI 的 CMake 编译（每个约 3 分钟）纯属浪费。
+        # 用 --init-script 从外部收窄，**不改上游任何文件**（与版本号用 -P 回灌同一思路，避免补丁漂移）。
+        # 脚本内部全程 try/catch：万一 AGP 版本差异导致改写失败，也只打印告警、不影响构建；
+        # 产物选取步骤仍只取 ${{ env.TARGET_ABI }}，最坏情况 = 没省下时间，而非构建失败。
+        run: |
+          cat > "$RUNNER_TEMP/restrict-abi.init.gradle" <<'GRADLEEOF'
+          // CI 专用：把 ABI 收窄到 TARGET_ABI（默认 arm64-v8a）。
+          // 在 afterEvaluate 里改；init 脚本的 allprojects 注册早于构建脚本体，
+          // 因此本回调先于 AGP 自己的 afterEvaluate 执行 —— 后者才据此创建 CMake 任务。
+          final String ABITARGET = System.getenv('TARGET_ABI') ?: 'arm64-v8a'
+          allprojects { proj ->
+              proj.afterEvaluate {
+                  try {
+                      def ext = proj.extensions.findByName('android')
+                      if (ext == null) return
+                      def dc = ext.defaultConfig
+                      if (dc != null && dc.ndk != null) {
+                          def before = new ArrayList(dc.ndk.abiFilters)
+                          dc.ndk.abiFilters.clear()
+                          dc.ndk.abiFilters.add(ABITARGET)
+                          println "[ci-restrict-abi] ${proj.name} ndk.abiFilters ${before} -> ${dc.ndk.abiFilters}"
+                      }
+                      try {
+                          if (ext.splits != null && ext.splits.abi != null) {
+                              ext.splits.abi.reset()
+                              ext.splits.abi.include(ABITARGET)
+                              ext.splits.abi.universalApk = false
+                              println "[ci-restrict-abi] ${proj.name} splits.abi -> ${ABITARGET}"
+                          }
+                      } catch (Throwable t) {
+                          println "[ci-restrict-abi] splits.abi 改写跳过: ${t}"
+                      }
+                  } catch (Throwable t) {
+                      println "[ci-restrict-abi] 收窄失败（忽略，构建照常进行）: ${t}"
+                  }
+              }
+          }
+          GRADLEEOF
+          echo "── restrict-abi.init.gradle（$(wc -l < "$RUNNER_TEMP/restrict-abi.init.gradle") 行）──"
+          cat "$RUNNER_TEMP/restrict-abi.init.gradle"
+
       - name: Build APK
         env:
           # 从上游 release 源码读到的版本号；显式回灌，确保产物版本与上游一致
@@ -718,10 +773,11 @@ jobs:
           if [ -n "$VER" ]; then VER_ARGS="$VER_ARGS -PversionName=$VER"; fi
           if [ -n "$VCODE" ]; then VER_ARGS="$VER_ARGS -PversionCode=$VCODE"; fi
           echo "版本参数:${VER_ARGS:-<无>}"
+          ABI_ARGS="--init-script $RUNNER_TEMP/restrict-abi.init.gradle"
           if [ "${{ needs.check.outputs.variant }}" = "release" ]; then
-            ./gradlew assembleRelease --no-daemon $VER_ARGS
+            ./gradlew assembleRelease --no-daemon $ABI_ARGS $VER_ARGS
           else
-            ./gradlew assembleDebug --no-daemon $VER_ARGS
+            ./gradlew assembleDebug --no-daemon $ABI_ARGS $VER_ARGS
           fi
 
       - name: 校验 release 签名
@@ -843,10 +899,13 @@ jobs:
             SIGN="调试密钥（每次构建可能不同）—— 更新前需要先卸载"
           fi
           NOTES=$(printf '跟随上游 ximeiorg/Xime 自动构建的「键盘底部贴底」补丁版。\n\n<!-- upstream-release: %s -->\n<!-- upstream-ref: %s -->\n<!-- upstream-sha: %s -->\n\n- 触发 release: `%s`\n- 上游版本: `%s`（versionCode %s，%s 轨道）\n- 上游源码引用: `%s`（有新 commit 即随 main 拉取）\n- 上游 commit: `%s`\n- 构建类型: %s\n- 目标架构: 仅 `%s`（现代手机适用；其他架构请改工作流的 TARGET_ABI）\n- 补丁: 手势导航下键区贴到屏幕底边（inset ≤ 38dp 不留白；三键导航仍避让）\n- 误触修复: 拇指指腹先触发的行不再抢先输出——松手时按手指最终落点改判按键；上滑/长按/光标手势不受影响\n- 无键帽模式: 主题设置里新增总开关，**对所有主题生效**；开启后键面不显示底色（透明），改画 1dp 按键边框标示键位，按下/高亮时给出提示；关闭后各主题观感不变\n- 键位调整: qwerty / qwerty_en / qwerty_tablet / qwerty_en_tablet 四个键盘段的 **v 键上滑与 n 键上滑对调（？ ↔ ％）**\n- 按键气泡: 按压气泡与上滑/下滑提示气泡已**去掉**（主键盘/面板/T9/笔画通用）；长按选择弹窗保留——它承担滑动挑选变体的视觉反馈，去掉会长按选字变成盲选\n- 符号页返回键: 全量符号浮层的返回键从**左上角**挪到**左下角**（底部行行首，圆形 ← 外观与行为不变），单手拇指更够得着；分类 Tab 与删除键位置不变\n- 内置方案市场: `assets/xime.yaml` 的 `base_urls` 顶部加入自建镜像（含 **oh-my-rime 薄荷拼音**等额外方案，可在「输入方案」里一键下载安装）；官方镜像保留作后备\n- 融合方式: 三方合并（自动适配上游改动），冲突时构建会失败并给出冲突片段\n- 包名: com.kingzcheung.xime —— 与官方同包名，首次安装前必须先卸载官方版\n- 签名: %s\n- sha256: `%s`\n- 大小: %s 字节\n- 资产: %s（带版本号）/ %s（稳定别名，永久链接不变）\n- 构建记录: https://github.com/%s/actions\n' "$UP_REL" "$UP_REF" "$UP" "$UP_REL" "$UP_VER" "${UP_VC:-?}" "$UP_MODE" "$UP_REF" "$SHORT" "$KIND" "$TARGET_ABI" "$SIGN" "$SHA256" "$SIZE" "$OUT" "$ALIAS" "$GITHUB_REPOSITORY")
+          # 正式版 Release（不是 prerelease）——这样 GitHub 主页右侧的 Releases 栏
+          # 与 releases/latest 都会指向这个「可下载的最新编译版」，而不是被每日自动
+          # 更新的方案包 prerelease 抢走（方案包刻意保持 prerelease，不参与 latest 计算）。
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes "$NOTES"
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes "$NOTES" --prerelease=false --latest
           else
-            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TITLE" --notes "$NOTES" --prerelease
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TITLE" --notes "$NOTES" --latest
           fi
           # gh release edit 只改 notes、**不改标题**（标题只在 create 时设）→ 显式 PATCH 一次，
           # 否则历史 release 的标题会一直停留在旧版本号上。

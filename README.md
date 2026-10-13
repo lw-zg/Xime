@@ -12,6 +12,19 @@
     alt="Get it on F-Droid"
     height="80">](https://f-droid.org/packages/com.kingzcheung.xime)
 
+## ⬇️ 本仓库自用编译版（arm64-v8a）
+
+在官方代码基础上打了自用补丁，**自动跟随上游正式 release 构建**，产物固定发布在本仓库的 [`patched-apk` Release](https://github.com/lw-zg/Xime/releases/tag/patched-apk)：
+
+**[→ 下载最新编译版 APK（永久链接）](https://github.com/lw-zg/Xime/releases/download/patched-apk/xime-patched-release-arm64-v8a.apk)**
+
+内置补丁：键盘底部贴底 · 滑键误触修复 · 无键帽模式开关 · ？↔％ 对调 · 去掉按键气泡 · 符号页返回键挪到左下角 · 方案市场镜像（含 oh-my-rime）。
+
+> 仅 arm64-v8a · R8 精简 + 固定密钥签名 → 可直接覆盖安装升级，不丢 Rime 数据。
+> 方案包另见：[oh-my-rime 输入方案包](https://github.com/lw-zg/Xime/releases/tag/oh-my-rime-scheme)（每日自动跟随上游）。
+
+---
+
 
 [Windows Version](https://github.com/ximeiorg/XimeYao) | [Linux Version](https://github.com/ximeiorg/XimeChe) | [Predictive Text Model](https://github.com/ximeiorg/predictive-text) | [Handwriting Model](https://github.com/ximeiorg/ochwpro)
 
