@@ -213,7 +213,7 @@
      val specialKeyTextColor = KeyboardThemes.getSpecialKeyTextColorForBackground(
          specialKeyBackgroundColor, keyTextColor
      )
-+    // ── 本地补丁：无键帽模式（主题设置页「按键边框」总开关，或内置「无键帽」主题）下
++    // ── 本地补丁：无键帽模式（主题设置页「无键帽模式」总开关，或内置「无键帽」主题）下
 +    //    键面与特殊键底色一律透明；特殊键文字色改用主题强调色（透明底上按亮度自适应
 +    //    会算出近白色，浅色键盘上看不见），其余主题取值不变。
 +    val keycapHidden = KeyboardThemes.isKeycapHidden(themeId)
@@ -282,15 +282,7 @@
                  else backgroundColor
 --- a/app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyButton.kt
 +++ b/app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyButton.kt
-@@ -1,6 +1,7 @@
- package com.kingzcheung.xime.ui.keyboard
- 
- import androidx.compose.foundation.background
-+import androidx.compose.foundation.border
- import androidx.compose.foundation.gestures.awaitEachGesture
- import androidx.compose.foundation.gestures.awaitFirstDown
- import androidx.compose.foundation.gestures.detectDragGestures
-@@ -138,6 +139,8 @@
+@@ -138,6 +138,8 @@
  private val shadowColorCache = HashMap<Color, Color>()
  
  internal fun crispShadowColor(backgroundColor: Color): Color {
@@ -299,7 +291,7 @@
      return shadowColorCache.getOrPut(backgroundColor) {
          val r = backgroundColor.red
          val g = backgroundColor.green
-@@ -388,10 +391,14 @@
+@@ -388,7 +390,9 @@
              .then(shadowModifier)
              .clip(keyClipShape)
              .background(
@@ -310,12 +302,7 @@
                  else if (isHighlighted) backgroundColor.copy(alpha = 0.8f)
                  else backgroundColor
              )
-+            // ── 本地补丁：无键帽模式（底色透明）时改画按键边框，键位依然清晰可辨 ──
-+            .then(if (backgroundColor.alpha < 0.05f) Modifier.border(1.dp, textColor.copy(alpha = 0.35f), keyClipShape) else Modifier)
-             .keySemantics(a11yDescription, a11yState) { currentOnClick() },
-         contentAlignment = Alignment.Center
-     ) {
-@@ -509,6 +516,9 @@
+@@ -509,6 +513,9 @@
      val currentOnRelease by rememberUpdatedState(onRelease)
      val currentOnClick by rememberUpdatedState(onClick)
      val currentOnLongPressSelect by rememberUpdatedState(onLongPressSelect)
@@ -325,7 +312,7 @@
      val currentLongPressItems by rememberUpdatedState(longPressItems)
      val currentLongPressDrawableIds by rememberUpdatedState(longPressDrawableIds)
      val scope = rememberCoroutineScope()
-@@ -575,7 +585,7 @@
+@@ -575,7 +582,7 @@
                              !hasTriggeredSwipeUp && !hasTriggeredSwipeDown &&
                              !hasTriggeredSwipeLeft && !hasTriggeredSwipeRight &&
                              abs(dragOffsetX) < horizontalClickCancelThreshold
@@ -334,7 +321,7 @@
                              currentOnClick()
                          }
                          isPressed = false
-@@ -681,7 +691,8 @@
+@@ -681,7 +688,8 @@
                              }
                          },
                          onTap = {
@@ -344,7 +331,7 @@
                          }
                      )
                      return@pointerInput
-@@ -772,7 +783,7 @@
+@@ -772,7 +780,7 @@
                                      // 而 dragActivated 由 touch slop（更大）触发。两者之间的位移区间
                                      // （5dp~touchSlop）若被 swipeDetected 吞掉点击，且 drag 未激活无 dragEnd
                                      // 兜底，会造成快速打字漏键（吃键）。5dp 位移只用于取消长按（longPressJob）。
@@ -353,7 +340,7 @@
                                  }
                              }
                          }
-@@ -791,10 +802,14 @@
+@@ -791,7 +799,9 @@
              .then(shadowModifier)
              .clip(keyClipShape)
              .background(
@@ -364,12 +351,7 @@
                  else if (isHighlighted) backgroundColor.copy(alpha = 0.8f)
                  else backgroundColor
              )
-+            // ── 本地补丁：无键帽模式（底色透明）时改画按键边框，键位依然清晰可辨 ──
-+            .then(if (backgroundColor.alpha < 0.05f) Modifier.border(1.dp, textColor.copy(alpha = 0.35f), keyClipShape) else Modifier)
-             .keySemantics(a11yDescription, a11yState) { currentOnClick() },
-         contentAlignment = if (layoutMode == ButtonLayout.COMPACT) Alignment.TopStart else Alignment.Center
-     ) {
-@@ -1153,10 +1168,14 @@
+@@ -1153,7 +1163,9 @@
              .then(shadowModifier)
              .clip(keyClipShape)
              .background(
@@ -380,12 +362,7 @@
                  else if (isHighlighted) darkenColor(backgroundColor, 0.2f)
                  else backgroundColor
              )
-+            // ── 本地补丁：无键帽模式（底色透明）时改画按键边框，键位依然清晰可辨 ──
-+            .then(if (backgroundColor.alpha < 0.05f) Modifier.border(1.dp, iconColor.copy(alpha = 0.35f), keyClipShape) else Modifier)
-             .keySemantics(a11yDescription, a11yState) { currentOnClick() },
-         contentAlignment = Alignment.Center
-     ) {
-@@ -1490,10 +1509,14 @@
+@@ -1490,7 +1502,9 @@
              .then(shadowModifier)
              .clip(keyClipShape)
              .background(
@@ -396,12 +373,7 @@
                  else if (isHighlighted) backgroundColor.copy(alpha = 0.8f)
                  else backgroundColor
              )
-+            // ── 本地补丁：无键帽模式（底色透明）时改画按键边框，键位依然清晰可辨 ──
-+            .then(if (backgroundColor.alpha < 0.05f) Modifier.border(1.dp, iconColor.copy(alpha = 0.35f), keyClipShape) else Modifier)
-             .keySemantics(a11yDescription, a11yState) { currentOnClick() },
-         contentAlignment = Alignment.Center
-     ) {
-@@ -1582,6 +1605,8 @@
+@@ -1582,6 +1596,8 @@
      val currentOnSwipeLeft by rememberUpdatedState(onSwipeLeft)
      val currentOnSwipeRight by rememberUpdatedState(onSwipeRight)
      val currentOnClick by rememberUpdatedState(onClick)
@@ -410,7 +382,7 @@
      val currentOnPress by rememberUpdatedState(onPress)
      val currentOnRelease by rememberUpdatedState(onRelease)
      val currentOnLongPressSelect by rememberUpdatedState(onLongPressSelect)
-@@ -1648,7 +1673,8 @@
+@@ -1648,7 +1664,8 @@
                              currentOnSwipeStateChange?.invoke(SwipeState(), buttonBounds)
                          },
                          onTap = {
@@ -420,7 +392,7 @@
                          }
                      )
                  } else {
-@@ -1733,7 +1759,7 @@
+@@ -1733,7 +1750,7 @@
                                          // 而 dragActivated 由 touch slop（更大）触发。5dp~touchSlop 区间
                                          // 若被 swipeDetected 吞掉点击且 drag 未激活，会造成快速打字漏键。
                                          // 5dp 位移只用于取消长按（longPressJob）。
@@ -429,7 +401,7 @@
                                      }
                                  }
                              }
-@@ -1768,7 +1794,8 @@
+@@ -1768,7 +1785,8 @@
                              onDragEnd = {
                                  if (!hasTriggeredSwipeUp && !hasTriggeredSwipeDown &&
                                      !hasTriggeredSwipeLeft && !hasTriggeredSwipeRight &&
@@ -439,7 +411,7 @@
                                      onClick()
                                  }
                                  dragActivated = false
-@@ -1869,7 +1896,13 @@
+@@ -1869,7 +1887,11 @@
              .padding(LocalKeyVisualPadding.current)
              .then(shadowModifier)
              .clip(keyClipShape)
@@ -448,9 +420,7 @@
 +                if (backgroundColor.alpha < 0.05f) {
 +                    if (isPressed) textColor.copy(alpha = 0.30f) else Color.Transparent
 +                } else if (isPressed) darkenColor(backgroundColor) else backgroundColor
-+            )
-+            // ── 本地补丁：无键帽模式（底色透明）时改画按键边框，键位依然清晰可辨 ──
-+            .then(if (backgroundColor.alpha < 0.05f) Modifier.border(1.dp, textColor.copy(alpha = 0.35f), keyClipShape) else Modifier),
++            ),
          contentAlignment = Alignment.TopStart
      ) {
          val contentScale = adaptiveKeyContentScale(
@@ -468,12 +438,12 @@
  )
  
  object KeyboardThemes {
-+    // ── 本地补丁：「无键帽」模式 = 主题设置页里的「按键边框」总开关，适配所有主题 ──
++    // ── 本地补丁：「无键帽」模式 = 主题设置页里的「无键帽模式」总开关，适配所有主题 ──
 +    /** 内置「无键帽」主题 id（保留兼容：旧版本选中过该主题的用户仍生效）。 */
 +    const val HIDDEN_KEYCAP_ID = "no_keycap"
 +
 +    /**
-+     * 全局「无键帽」开关：开启后**所有主题**的键面底色统一透明（改画按键边框），
++     * 全局「无键帽」开关：开启后**所有主题**的键面底色统一透明（键面完全干净、不画任何边框），
 +     * 在主题设置页切换，持久化于 SharedPreferences（与 [SettingsPreferences] 同一文件）。
 +     * 用 Compose 状态包装：设置页切换后键盘/主题预览即时重组（IME 与设置页同进程）。
 +     */
@@ -624,7 +594,7 @@
              item {
                  Spacer(modifier = Modifier.height(8.dp))
                  Text(
-+                    text = "按键边框",
++                    text = "键盘外观",
 +                    style = MaterialTheme.typography.labelLarge,
 +                    color = MaterialTheme.colorScheme.primary,
 +                    modifier = Modifier.padding(bottom = 6.dp)
@@ -645,7 +615,7 @@
 +                            fontWeight = FontWeight.Medium
 +                        )
 +                        Text(
-+                            text = "所有主题的键面不画底色，仅保留按键边框；按下时高亮提示",
++                            text = "所有主题的键面不画底色与边框，只留文字/图标；按下时高亮提示",
 +                            style = MaterialTheme.typography.bodySmall,
 +                            color = MaterialTheme.colorScheme.onSurfaceVariant
 +                        )
@@ -669,7 +639,7 @@
      val darkMode: Int = 0,
      val colorTheme: String = "lavender_purple",
      val colorThemes: List<KeyboardColorScheme> = KeyboardThemes.themes,
-+    // ── 本地补丁：全局「无键帽」开关（键面透明、只画按键边框），对所有主题生效 ──
++    // ── 本地补丁：全局「无键帽」开关（键面底色与边框全部去掉），对所有主题生效 ──
 +    val noKeycapMode: Boolean = false,
  )
  
