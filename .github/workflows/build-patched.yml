@@ -1,11 +1,15 @@
 # 跟随上游 ximeiorg/Xime 自动构建「键盘底部贴底」补丁版 APK
 #
-# ── 触发策略：只跟「正式 release」，不跟每次 commit ─────────────────────
-# 上游平时往 main 推的 commit 我们不追着编译；等它**发布正式 release**
-# （GitHub 的 releases/latest，天然排除 nightly 这类 prerelease 与 draft）时，
-# 才按**该 release 的 tag** 检出源码编译，并把**上游版本号**（versionName/versionCode，
-# 直接从该 tag 的 app/build.gradle.kts 读出）同步到我们的产物与发布说明里。
-# 需要提前验证某个未发布的提交时，手动触发并填 `ref`（如 main 或某 tag/分支）即可。
+# ── 触发策略：release 才编译；源码始终跟上游最新 ────────────────────────
+# 上游平时往 main 推的 commit，我们**随时可以拉取**（编译就直接检出 main 的最新提交）；
+# 但**只有当上游发布正式 release**（GitHub 的 releases/latest，天然排除 nightly 这类
+# prerelease 与 draft）时，才真正**开始编译** —— 用 release 的 tag 变化当「闸门」。
+# 编译时源码取上游 **main 最新提交**，并把它在 app/build.gradle.kts 里声明的**上游版本号**
+# （versionName / versionCode）显式回灌进产物，保证版本号与上游同步。
+# 为何检出 main 而不是 release 的 tag：patch-base/ 是对着 main 快照生成的，检出更旧的 tag
+# 会让三方合并反向而冲突；而且需求本身是「有新 commit 可以拉取」。
+# 需要提前验证某个未发布的提交时，手动触发并填 `ref`（如某 tag / 分支）即可 ——
+# 这时源码与版本号都以该 `ref` 为准。
 #
 # ── 产物 ───────────────────────────────────────────────────────────────
 # 默认构建 **release**（R8 精简 + 资源压缩），且只打包 **arm64-v8a**，用**固定密钥**签名：
@@ -56,7 +60,7 @@ on:
           - debug
         default: release
       ref:
-        description: '手动指定上游源码引用（留空 = 上游最新正式 release 的 tag；可填 main 或某 tag/分支以构建未发布的提交）'
+        description: '手动指定上游源码引用（留空 = 上游 main 最新提交；可填某 tag/分支以构建指定提交，版本号随之取该引用）'
         required: false
         type: string
         default: ''
@@ -79,13 +83,14 @@ jobs:
       build: ${{ steps.decide.outputs.build }}
       sha: ${{ steps.decide.outputs.sha }}
       ref: ${{ steps.decide.outputs.ref }}
+      rel: ${{ steps.decide.outputs.rel }}
       version: ${{ steps.decide.outputs.version }}
       version_code: ${{ steps.decide.outputs.version_code }}
       mode: ${{ steps.decide.outputs.mode }}
       variant: ${{ steps.decide.outputs.variant }}
       tag: ${{ steps.decide.outputs.tag }}
     steps:
-      - name: 定位上游最新正式 release 并与上次构建比对
+      - name: 以上游正式 release 为闸门；构建源取 main 最新提交并同步版本号
         id: decide
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -97,15 +102,15 @@ jobs:
           if [ "$VARIANT" = "debug" ]; then TAG=patched-apk-debug; else TAG=patched-apk; fi
           MREF="${{ github.event.inputs.ref }}"
 
-          if [ -n "$MREF" ]; then
-            REF="$MREF"; MODE=manual
-          else
-            # GitHub 的 releases/latest 天然排除 prerelease（如上游 nightly）与 draft，
-            # 正好对应「等上游发布正式 release 再编译」。
-            RREL=$(gh api "repos/$UP/releases/latest" --jq .tag_name 2>/dev/null || true)
-            if [ -n "$RREL" ]; then REF="$RREL"; MODE=release; else REF=main; MODE=fallback; fi
-          fi
-          echo "上游发布轨道 = $MODE ；本次源码引用 = $REF"
+          # ① 「闸门」= 上游最新正式 release 的 tag。
+          #    GitHub 的 releases/latest 天然排除 prerelease（如上游 nightly）与 draft，
+          #    正好对应「等上游发布正式 release 再编译」。
+          REL=$(gh api "repos/$UP/releases/latest" --jq .tag_name 2>/dev/null || true)
+          [ -n "$REL" ] || REL="<none>"
+
+          # ② 「构建源」= 上游 main 最新提交（有新 commit 随时可拉取）；手动指定则用 ref。
+          if [ -n "$MREF" ]; then REF="$MREF"; MODE=manual; else REF=main; MODE=release; fi
+          echo "上游正式 release = $REL ；本次构建源 = $REF（$MODE 轨道）"
 
           # 解析该引用指向的提交（tag 优先解引用 ^{}，退而求其次直接取 tag / 分支）
           SHA=$(git ls-remote "https://github.com/$UP.git" "refs/tags/$REF^{}" | cut -f1 || true)
@@ -114,7 +119,7 @@ jobs:
           [ -n "$SHA" ] || { echo "::error::无法解析上游引用 $REF"; exit 1; }
           echo "上游 $REF = $SHA"
 
-          # 真正「同步上游版本号」：直接从该引用的 app/build.gradle.kts 里读
+          # ③ 真正「同步上游版本号」：直接从**构建源**的 app/build.gradle.kts 里读
           GURL="repos/$UP/contents/app/build.gradle.kts?ref=$REF"
           GRADLE=$(gh api "$GURL" -H "Accept: application/vnd.github.raw" 2>/dev/null || true)
           VER=$(printf '%s\n' "$GRADLE" | grep -oE 'versionName[[:space:]]*=[[:space:]]*"[^"]+"' | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
@@ -122,10 +127,12 @@ jobs:
           if [ -z "$VER" ]; then echo "::error::无法从 $REF 的 app/build.gradle.kts 读取 versionName"; exit 1; fi
           echo "上游版本 = $VER (versionCode ${VC:-<未读到>})"
 
-          LASTREF=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body 2>/dev/null | grep -o 'upstream-ref: [^ ]*' | head -1 | cut -d' ' -f2 || true)
-          echo "上次成功构建于 = ${LASTREF:-<无记录>}"
+          # ④ 比对的是**闸门（release tag）**，不是构建源 —— 否则恒等于 main 会永远跳过
+          LASTREL=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body 2>/dev/null | grep -o 'upstream-release: [^ ]*' | head -1 | cut -d' ' -f2 || true)
+          echo "上次编译时的上游 release = ${LASTREL:-<无记录>}"
 
           {
+            echo "rel=$REL"
             echo "ref=$REF"
             echo "sha=$SHA"
             echo "version=$VER"
@@ -140,11 +147,14 @@ jobs:
           elif [ "$MODE" = "manual" ]; then
             echo "手动指定源码引用 $REF，构建"
             echo "build=true" >> "$GITHUB_OUTPUT"
-          elif [ "$REF" = "$LASTREF" ]; then
-            echo "上游正式 release 未变化（$REF），跳过构建"
+          elif [ "$REL" = "<none>" ]; then
+            echo "上游尚无正式 release，本次跳过（手动触发可加 force 或指定 ref）"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          elif [ "$REL" = "$LASTREL" ]; then
+            echo "上游正式 release 未变化（$REL），跳过构建"
             echo "build=false" >> "$GITHUB_OUTPUT"
           else
-            echo "上游有新正式 release（$REF），开始构建"
+            echo "上游有新正式 release（$REL），开始构建"
             echo "build=true" >> "$GITHUB_OUTPUT"
           fi
 
@@ -159,8 +169,11 @@ jobs:
       size: ${{ steps.publish.outputs.size }}
       variant: ${{ steps.publish.outputs.variant }}
       tag: ${{ steps.publish.outputs.tag }}
+      ref: ${{ steps.publish.outputs.ref }}
+      rel: ${{ steps.publish.outputs.rel }}
+      version: ${{ steps.publish.outputs.version }}
     steps:
-      - name: 检出上游源码（按 release tag / 指定引用，版本号随之一致）
+      - name: 检出上游源码（构建源 = main 最新提交 / 手动指定的 ref）
         uses: actions/checkout@v7
         with:
           repository: ximeiorg/Xime
@@ -177,12 +190,14 @@ jobs:
           rm -rf "$REF" && mkdir -p "$REF/patch-base"
           for f in xime-flush-bottom.patch \
                    patch-base/XimeInputMethodService.kt patch-base/KeyboardLayout.kt \
-                   patch-base/KeyButton.kt patch-base/KeyboardTheme.kt; do
+                   patch-base/KeyButton.kt patch-base/KeyboardTheme.kt \
+                   patch-base/xime.yaml; do
             gh api -H "Accept: application/vnd.github.raw" "repos/$GITHUB_REPOSITORY/contents/$f?ref=main" > "$REF/$f"
           done
           echo "已取回："
           wc -l "$REF/xime-flush-bottom.patch" "$REF/patch-base/XimeInputMethodService.kt" \
-                "$REF/patch-base/KeyboardLayout.kt" "$REF/patch-base/KeyButton.kt" "$REF/patch-base/KeyboardTheme.kt"
+                "$REF/patch-base/KeyboardLayout.kt" "$REF/patch-base/KeyButton.kt" \
+                "$REF/patch-base/KeyboardTheme.kt" "$REF/patch-base/xime.yaml"
 
       - name: 套用补丁（三方合并，自动适配上游改动）
         run: |
@@ -195,19 +210,22 @@ jobs:
           F2="app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyboardLayout.kt"
           F3="app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyButton.kt"
           F4="app/src/main/java/com/kingzcheung/xime/ui/theme/KeyboardTheme.kt"
+          F5="app/src/main/assets/xime.yaml"
           N1="XimeInputMethodService.kt"
           N2="KeyboardLayout.kt"
           N3="KeyButton.kt"
           N4="KeyboardTheme.kt"
+          N5="xime.yaml"
 
           echo "── 1) 把补丁作用在 base 副本上，还原出「我们改完的版本」──"
           rm -rf "$RUNNER_TEMP/base" && mkdir -p "$RUNNER_TEMP/base"
           cd "$RUNNER_TEMP/base" && git init -q .
-          mkdir -p "$(dirname "$F1")" "$(dirname "$F2")" "$(dirname "$F3")" "$(dirname "$F4")"
+          mkdir -p "$(dirname "$F1")" "$(dirname "$F2")" "$(dirname "$F3")" "$(dirname "$F4")" "$(dirname "$F5")"
           cp "$BASE/$N1" "$F1"
           cp "$BASE/$N2" "$F2"
           cp "$BASE/$N3" "$F3"
           cp "$BASE/$N4" "$F4"
+          cp "$BASE/$N5" "$F5"
           if ! git apply "$PATCH"; then
             echo "::error::补丁在本仓库保存的 base 文件上都套不上 —— patch-base/ 与 xime-flush-bottom.patch 不配对，请一起重新生成"
             exit 1
@@ -216,12 +234,13 @@ jobs:
           cp "$F2" "$RUNNER_TEMP/post-$N2"
           cp "$F3" "$RUNNER_TEMP/post-$N3"
           cp "$F4" "$RUNNER_TEMP/post-$N4"
-          echo "  ✓ base + 补丁 = 目标版本（各 $(wc -l < "$F1") / $(wc -l < "$F2") / $(wc -l < "$F3") / $(wc -l < "$F4") 行）"
+          cp "$F5" "$RUNNER_TEMP/post-$N5"
+          echo "  ✓ base + 补丁 = 目标版本（各 $(wc -l < "$F1") / $(wc -l < "$F2") / $(wc -l < "$F3") / $(wc -l < "$F4") / $(wc -l < "$F5") 行）"
 
           echo "── 2) 与上游最新代码做三方合并 ──"
           cd "$WS"
           CONFLICT=0
-          for pair in "$F1|$N1" "$F2|$N2" "$F3|$N3" "$F4|$N4"; do
+          for pair in "$F1|$N1" "$F2|$N2" "$F3|$N3" "$F4|$N4" "$F5|$N5"; do
             rel="${pair%%|*}"; n="${pair##*|}"
             if git merge-file -p -L "上游最新/$n" -L "改动前的原版/$n" -L "我们改完的/$n" \
                  "$WS/$rel" "$BASE/$n" "$RUNNER_TEMP/post-$n" > "$RUNNER_TEMP/merged-$n" 2>"$RUNNER_TEMP/merr-$n"; then
@@ -260,8 +279,13 @@ jobs:
           if [ "$c3" != "6" ]; then echo "::error::$N3 里『透明底色分支』出现 $c3 次，应为 6 次"; fail=1; fi
           if ! grep -q -F 'HIDDEN_KEYCAP_ID' "$WS/$F4"; then echo "::error::「无键帽」主题定义丢失（HIDDEN_KEYCAP_ID 未出现）"; fail=1; fi
           if ! grep -q -F 'if (isKeycapHidden(themeId)) return Color.Transparent' "$WS/$F4"; then echo "::error::「无键帽」取色守卫丢失（getKeyBgColorOverride 未返回透明）"; fail=1; fi
+          # xime.yaml：方案市场索引 base_urls 顶部应插入自建镜像（含 oh-my-rime），官方镜像保留作后备
+          c5=$(grep -c -F 'cdn.jsdelivr.net/gh/lw-zg/Xime@xime-index/' "$WS/$F5" || true)
+          if [ "$c5" != "1" ]; then echo "::error::$N5 里自建镜像索引出现 $c5 次，应为 1 次"; fail=1; fi
+          if ! grep -q -F 'raw.githubusercontent.com/lw-zg/Xime/refs/heads/xime-index/' "$WS/$F5"; then echo "::error::$N5 里 raw 回退镜像丢失"; fail=1; fi
+          if ! grep -q -F 'https://index.ximei.me/' "$WS/$F5"; then echo "::error::$N5 里官方索引 index.ximei.me 被删了（应保留作后备）"; fail=1; fi
           if [ "$fail" != "0" ]; then exit 1; fi
-          echo "  ✓ 两处 38dp 阈值 + 去掉 18dp 兜底 + 键区内边距归零 + 底排外侧圆角 + 内置「无键帽」主题，全部到位"
+          echo "  ✓ 两处 38dp 阈值 + 去掉 18dp 兜底 + 键区内边距归零 + 底排外侧圆角 + 内置「无键帽」主题 + 内置方案市场镜像索引，全部到位"
           echo "── 相对上游的最终改动 ──"
           git --no-pager diff --stat
 
@@ -496,7 +520,7 @@ jobs:
         if: failure()
         run: |
           mkdir -p patch-base
-          cp -f "$RUNNER_TEMP/ref/patch-base/"*.kt patch-base/ 2>/dev/null || true
+          cp -f "$RUNNER_TEMP/ref/patch-base/"* patch-base/ 2>/dev/null || true
           cp -f "$RUNNER_TEMP/ref/xime-flush-bottom.patch" . 2>/dev/null || true
           ls -l patch-base 2>/dev/null || true
           ls -l CONFLICT-*.kt 2>/dev/null || true
@@ -526,6 +550,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VARIANT: ${{ needs.check.outputs.variant }}
           TAG: ${{ needs.check.outputs.tag }}
+          UP_REL: ${{ needs.check.outputs.rel }}
           UP_REF: ${{ needs.check.outputs.ref }}
           UP_VER: ${{ needs.check.outputs.version }}
           UP_VC: ${{ needs.check.outputs.version_code }}
@@ -548,7 +573,7 @@ jobs:
             KIND="debug"
             SIGN="调试密钥（每次构建可能不同）—— 更新前需要先卸载"
           fi
-          NOTES=$(printf '跟随上游 ximeiorg/Xime 自动构建的「键盘底部贴底」补丁版。\n\n<!-- upstream-ref: %s -->\n<!-- upstream-sha: %s -->\n\n- 上游版本: `%s`（versionCode %s，%s 轨道）\n- 上游源码引用: `%s`\n- 上游 commit: `%s`\n- 构建类型: %s\n- 目标架构: 仅 `%s`（现代手机适用；其他架构请改工作流的 TARGET_ABI）\n- 补丁: 手势导航下键区贴到屏幕底边（inset ≤ 38dp 不留白；三键导航仍避让）\n- 新增主题: 「无键帽」——键面不显示底色（透明），仅按下/高亮时给出提示；在主题里选中才生效，其它主题观感不变\n- 融合方式: 三方合并（自动适配上游改动），冲突时构建会失败并给出冲突片段\n- 包名: com.kingzcheung.xime —— 与官方同包名，首次安装前必须先卸载官方版\n- 签名: %s\n- sha256: `%s`\n- 大小: %s 字节\n- 构建记录: https://github.com/%s/actions\n' "$UP_REF" "$UP" "$UP_VER" "${UP_VC:-?}" "$UP_MODE" "$UP_REF" "$SHORT" "$KIND" "$TARGET_ABI" "$SIGN" "$SHA256" "$SIZE" "$GITHUB_REPOSITORY")
+          NOTES=$(printf '跟随上游 ximeiorg/Xime 自动构建的「键盘底部贴底」补丁版。\n\n<!-- upstream-release: %s -->\n<!-- upstream-ref: %s -->\n<!-- upstream-sha: %s -->\n\n- 触发 release: `%s`\n- 上游版本: `%s`（versionCode %s，%s 轨道）\n- 上游源码引用: `%s`（有新 commit 即随 main 拉取）\n- 上游 commit: `%s`\n- 构建类型: %s\n- 目标架构: 仅 `%s`（现代手机适用；其他架构请改工作流的 TARGET_ABI）\n- 补丁: 手势导航下键区贴到屏幕底边（inset ≤ 38dp 不留白；三键导航仍避让）\n- 新增主题: 「无键帽」——键面不显示底色（透明），仅按下/高亮时给出提示；在主题里选中才生效，其它主题观感不变\n- 内置方案市场: `assets/xime.yaml` 的 `base_urls` 顶部加入自建镜像（含 **oh-my-rime 薄荷拼音**等额外方案，可在「输入方案」里一键下载安装）；官方镜像保留作后备\n- 融合方式: 三方合并（自动适配上游改动），冲突时构建会失败并给出冲突片段\n- 包名: com.kingzcheung.xime —— 与官方同包名，首次安装前必须先卸载官方版\n- 签名: %s\n- sha256: `%s`\n- 大小: %s 字节\n- 构建记录: https://github.com/%s/actions\n' "$UP_REL" "$UP_REF" "$UP" "$UP_REL" "$UP_VER" "${UP_VC:-?}" "$UP_MODE" "$UP_REF" "$SHORT" "$KIND" "$TARGET_ABI" "$SIGN" "$SHA256" "$SIZE" "$GITHUB_REPOSITORY")
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes "$NOTES"
           else
@@ -564,6 +589,7 @@ jobs:
             echo "size=$SIZE"
             echo "variant=$VARIANT"
             echo "tag=$TAG"
+            echo "rel=$UP_REL"
             echo "ref=$UP_REF"
             echo "version=$UP_VER"
           } >> "$GITHUB_OUTPUT"
@@ -590,6 +616,7 @@ jobs:
           body: |
             Xime「键盘底部贴底」补丁版 APK 已自动跟随上游正式 release 重新构建、发布。
 
+            上游 release: ${{ needs.build.outputs.rel }}
             上游版本    : ${{ needs.build.outputs.version }}
             上游引用    : ${{ needs.build.outputs.ref }}
             上游 commit : ${{ needs.build.outputs.sha }}

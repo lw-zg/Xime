@@ -229,3 +229,16 @@
          dynamicThemeColor(themeId) { if (isDark) it.keyBgDark else it.keyBgLight }?.let { return it }
          val entry = configOverrides[themeId] ?: return null
          return resolveKeyBgColor(entry, isDark)
+--- a/app/src/main/assets/xime.yaml
++++ b/app/src/main/assets/xime.yaml
+@@ -11,6 +11,10 @@
+   # 可替换为自建代理/镜像，下载器按顺序依次尝试，直到成功为止。
+   # 末尾需要 /。
+   base_urls:
++    # 本补丁版：先试 lw-zg/Xime 的方案/插件/模型镜像（含 oh-my-rime 等额外方案），失败自动回退官方镜像
++    - "https://cdn.jsdelivr.net/gh/lw-zg/Xime@xime-index/"
++    - "https://fastly.jsdelivr.net/gh/lw-zg/Xime@xime-index/"
++    - "https://raw.githubusercontent.com/lw-zg/Xime/refs/heads/xime-index/"
+     - "https://cdn.jsdelivr.net/gh/ximeiorg/xime-index@master/"
+     - "https://fastly.jsdelivr.net/gh/ximeiorg/xime-index@master/"
+     - "https://index.ximei.me/"
