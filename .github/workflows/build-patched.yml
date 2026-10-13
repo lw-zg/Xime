@@ -1,5 +1,12 @@
 # 跟随上游 ximeiorg/Xime 自动构建「键盘底部贴底」补丁版 APK
 #
+# ── 触发策略：只跟「正式 release」，不跟每次 commit ─────────────────────
+# 上游平时往 main 推的 commit 我们不追着编译；等它**发布正式 release**
+# （GitHub 的 releases/latest，天然排除 nightly 这类 prerelease 与 draft）时，
+# 才按**该 release 的 tag** 检出源码编译，并把**上游版本号**（versionName/versionCode，
+# 直接从该 tag 的 app/build.gradle.kts 读出）同步到我们的产物与发布说明里。
+# 需要提前验证某个未发布的提交时，手动触发并填 `ref`（如 main 或某 tag/分支）即可。
+#
 # ── 产物 ───────────────────────────────────────────────────────────────
 # 默认构建 **release**（R8 精简 + 资源压缩），且只打包 **arm64-v8a**，用**固定密钥**签名：
 #   · release   -> Release 标签 `patched-apk`        （永久链接，可覆盖安装升级）
@@ -36,7 +43,7 @@ on:
   workflow_dispatch:
     inputs:
       force:
-        description: '即使上游没有新提交也强制重新构建（同时跑一遍三方合并自检）'
+        description: '即使上游 release 未变化也强制重新构建（同时跑一遍三方合并自检）'
         required: false
         type: boolean
         default: false
@@ -48,6 +55,11 @@ on:
           - release
           - debug
         default: release
+      ref:
+        description: '手动指定上游源码引用（留空 = 上游最新正式 release 的 tag；可填 main 或某 tag/分支以构建未发布的提交）'
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: write
@@ -66,36 +78,73 @@ jobs:
     outputs:
       build: ${{ steps.decide.outputs.build }}
       sha: ${{ steps.decide.outputs.sha }}
+      ref: ${{ steps.decide.outputs.ref }}
+      version: ${{ steps.decide.outputs.version }}
+      version_code: ${{ steps.decide.outputs.version_code }}
+      mode: ${{ steps.decide.outputs.mode }}
       variant: ${{ steps.decide.outputs.variant }}
       tag: ${{ steps.decide.outputs.tag }}
     steps:
-      - name: 比对上游最新提交与上次构建
+      - name: 定位上游最新正式 release 并与上次构建比对
         id: decide
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
+          UP=ximeiorg/Xime
           VARIANT="${{ github.event.inputs.variant }}"
           [ -n "$VARIANT" ] || VARIANT=release
           if [ "$VARIANT" = "debug" ]; then TAG=patched-apk-debug; else TAG=patched-apk; fi
-          echo "构建类型 = $VARIANT ；Release 标签 = $TAG"
-          SHA=$(git ls-remote https://github.com/ximeiorg/Xime.git refs/heads/main | cut -f1)
-          echo "上游 ximeiorg/Xime@main = $SHA"
-          LAST=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body 2>/dev/null | grep -o 'upstream-sha: [0-9a-f]\{40\}' | head -1 | cut -d' ' -f2 || true)
-          echo "上次成功构建于 = ${LAST:-<无记录>}"
+          MREF="${{ github.event.inputs.ref }}"
+
+          if [ -n "$MREF" ]; then
+            REF="$MREF"; MODE=manual
+          else
+            # GitHub 的 releases/latest 天然排除 prerelease（如上游 nightly）与 draft，
+            # 正好对应「等上游发布正式 release 再编译」。
+            RREL=$(gh api "repos/$UP/releases/latest" --jq .tag_name 2>/dev/null || true)
+            if [ -n "$RREL" ]; then REF="$RREL"; MODE=release; else REF=main; MODE=fallback; fi
+          fi
+          echo "上游发布轨道 = $MODE ；本次源码引用 = $REF"
+
+          # 解析该引用指向的提交（tag 优先解引用 ^{}，退而求其次直接取 tag / 分支）
+          SHA=$(git ls-remote "https://github.com/$UP.git" "refs/tags/$REF^{}" | cut -f1 || true)
+          [ -n "$SHA" ] || SHA=$(git ls-remote "https://github.com/$UP.git" "refs/tags/$REF" | cut -f1 || true)
+          [ -n "$SHA" ] || SHA=$(git ls-remote "https://github.com/$UP.git" "refs/heads/$REF" | cut -f1 || true)
+          [ -n "$SHA" ] || { echo "::error::无法解析上游引用 $REF"; exit 1; }
+          echo "上游 $REF = $SHA"
+
+          # 真正「同步上游版本号」：直接从该引用的 app/build.gradle.kts 里读
+          GURL="repos/$UP/contents/app/build.gradle.kts?ref=$REF"
+          GRADLE=$(gh api "$GURL" -H "Accept: application/vnd.github.raw" 2>/dev/null || true)
+          VER=$(printf '%s\n' "$GRADLE" | grep -oE 'versionName[[:space:]]*=[[:space:]]*"[^"]+"' | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+          VC=$(printf '%s\n' "$GRADLE" | grep -oE 'versionCode[[:space:]]*=[[:space:]]*[0-9]+' | head -1 | grep -oE '[0-9]+' || true)
+          if [ -z "$VER" ]; then echo "::error::无法从 $REF 的 app/build.gradle.kts 读取 versionName"; exit 1; fi
+          echo "上游版本 = $VER (versionCode ${VC:-<未读到>})"
+
+          LASTREF=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body 2>/dev/null | grep -o 'upstream-ref: [^ ]*' | head -1 | cut -d' ' -f2 || true)
+          echo "上次成功构建于 = ${LASTREF:-<无记录>}"
+
           {
+            echo "ref=$REF"
             echo "sha=$SHA"
+            echo "version=$VER"
+            echo "version_code=$VC"
+            echo "mode=$MODE"
             echo "variant=$VARIANT"
             echo "tag=$TAG"
           } >> "$GITHUB_OUTPUT"
           if [ "${{ github.event.inputs.force }}" = "true" ]; then
             echo "手动强制构建"
             echo "build=true" >> "$GITHUB_OUTPUT"
-          elif [ "$SHA" = "$LAST" ]; then
-            echo "上游无新提交，跳过构建"
+          elif [ "$MODE" = "manual" ]; then
+            echo "手动指定源码引用 $REF，构建"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          elif [ "$REF" = "$LASTREF" ]; then
+            echo "上游正式 release 未变化（$REF），跳过构建"
             echo "build=false" >> "$GITHUB_OUTPUT"
           else
-            echo "上游有更新，开始构建"
+            echo "上游有新正式 release（$REF），开始构建"
             echo "build=true" >> "$GITHUB_OUTPUT"
           fi
 
@@ -111,11 +160,11 @@ jobs:
       variant: ${{ steps.publish.outputs.variant }}
       tag: ${{ steps.publish.outputs.tag }}
     steps:
-      - name: 检出上游最新源码
+      - name: 检出上游源码（按 release tag / 指定引用，版本号随之一致）
         uses: actions/checkout@v7
         with:
           repository: ximeiorg/Xime
-          ref: main
+          ref: ${{ needs.check.outputs.ref }}
           fetch-depth: 0
           submodules: recursive
 
@@ -371,11 +420,20 @@ jobs:
           git status --porcelain app/keystore.properties || true
 
       - name: Build APK
+        env:
+          # 从上游 release 源码读到的版本号；显式回灌，确保产物版本与上游一致
+          VER: ${{ needs.check.outputs.version }}
+          VCODE: ${{ needs.check.outputs.version_code }}
         run: |
+          set -e
+          VER_ARGS=""
+          if [ -n "$VER" ]; then VER_ARGS="$VER_ARGS -PversionName=$VER"; fi
+          if [ -n "$VCODE" ]; then VER_ARGS="$VER_ARGS -PversionCode=$VCODE"; fi
+          echo "版本参数:${VER_ARGS:-<无>}"
           if [ "${{ needs.check.outputs.variant }}" = "release" ]; then
-            ./gradlew assembleRelease --no-daemon
+            ./gradlew assembleRelease --no-daemon $VER_ARGS
           else
-            ./gradlew assembleDebug --no-daemon
+            ./gradlew assembleDebug --no-daemon $VER_ARGS
           fi
 
       - name: 校验 release 签名
@@ -416,6 +474,24 @@ jobs:
           fi
           echo "apk=$APK" >> "$GITHUB_OUTPUT"
 
+      - name: 核对 APK 版本号已同步上游 release
+        env:
+          EXPECT: ${{ needs.check.outputs.version }}
+        run: |
+          set -e
+          APK="${{ steps.pick.outputs.apk }}"
+          AAPT=$(ls "$ANDROID_HOME"/build-tools/*/aapt 2>/dev/null | tail -1 || true)
+          if [ -z "$AAPT" ] || [ -z "$EXPECT" ]; then
+            echo "::warning::缺少 aapt 或期望版本号，跳过版本号核对"
+            exit 0
+          fi
+          GOT=$("$AAPT" dump badging "$APK" | grep -m1 -oE "versionName='[^']*'" | sed -E "s/versionName='([^']*)'/\1/")
+          echo "APK versionName = $GOT ；上游 release 版本 = $EXPECT"
+          if [ "$GOT" != "$EXPECT" ]; then
+            echo "::error::APK 版本号与上游 release 不一致（$GOT != $EXPECT）—— 版本同步失效"
+            exit 1
+          fi
+
       - name: 收集失败现场（仅失败时；基准文件在 $RUNNER_TEMP，要先拷回工作区）
         if: failure()
         run: |
@@ -450,6 +526,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VARIANT: ${{ needs.check.outputs.variant }}
           TAG: ${{ needs.check.outputs.tag }}
+          UP_REF: ${{ needs.check.outputs.ref }}
+          UP_VER: ${{ needs.check.outputs.version }}
+          UP_VC: ${{ needs.check.outputs.version_code }}
+          UP_MODE: ${{ needs.check.outputs.mode }}
         run: |
           set -e
           APK="${{ steps.pick.outputs.apk }}"
@@ -460,15 +540,15 @@ jobs:
           SHA256=$(sha256sum "$OUT" | cut -d' ' -f1)
           SIZE=$(stat -c%s "$OUT")
           if [ "$VARIANT" = "release" ]; then
-            TITLE="Xime 贴底补丁版 · release（arm64，自动跟随上游）"
+            TITLE="Xime 贴底补丁版 · ${UP_VER:-$SHORT}（arm64，自动跟随上游 release）"
             KIND="release（R8 精简 + 资源压缩）"
             SIGN="固定密钥签名（密钥存在本仓库 Secrets 里）—— 以后**可直接覆盖安装升级，不会丢 Rime 数据**"
           else
-            TITLE="Xime 贴底补丁版 · debug（arm64，自动跟随上游）"
+            TITLE="Xime 贴底补丁版 · debug（arm64，自动跟随上游 release）"
             KIND="debug"
             SIGN="调试密钥（每次构建可能不同）—— 更新前需要先卸载"
           fi
-          NOTES=$(printf '跟随上游 ximeiorg/Xime 自动构建的「键盘底部贴底」补丁版。\n\n<!-- upstream-sha: %s -->\n\n- 上游 commit: `%s`\n- 构建类型: %s\n- 目标架构: 仅 `%s`（现代手机适用；其他架构请改工作流的 TARGET_ABI）\n- 补丁: 手势导航下键区贴到屏幕底边（inset ≤ 38dp 不留白；三键导航仍避让）\n- 新增主题: 「无键帽」——键面不显示底色（透明），仅按下/高亮时给出提示；在主题里选中才生效，其它主题观感不变\n- 融合方式: 三方合并（自动适配上游改动），冲突时构建会失败并给出冲突片段\n- 包名: com.kingzcheung.xime —— 与官方同包名，首次安装前必须先卸载官方版\n- 签名: %s\n- sha256: `%s`\n- 大小: %s 字节\n- 构建记录: https://github.com/%s/actions\n' "$UP" "$SHORT" "$KIND" "$TARGET_ABI" "$SIGN" "$SHA256" "$SIZE" "$GITHUB_REPOSITORY")
+          NOTES=$(printf '跟随上游 ximeiorg/Xime 自动构建的「键盘底部贴底」补丁版。\n\n<!-- upstream-ref: %s -->\n<!-- upstream-sha: %s -->\n\n- 上游版本: `%s`（versionCode %s，%s 轨道）\n- 上游源码引用: `%s`\n- 上游 commit: `%s`\n- 构建类型: %s\n- 目标架构: 仅 `%s`（现代手机适用；其他架构请改工作流的 TARGET_ABI）\n- 补丁: 手势导航下键区贴到屏幕底边（inset ≤ 38dp 不留白；三键导航仍避让）\n- 新增主题: 「无键帽」——键面不显示底色（透明），仅按下/高亮时给出提示；在主题里选中才生效，其它主题观感不变\n- 融合方式: 三方合并（自动适配上游改动），冲突时构建会失败并给出冲突片段\n- 包名: com.kingzcheung.xime —— 与官方同包名，首次安装前必须先卸载官方版\n- 签名: %s\n- sha256: `%s`\n- 大小: %s 字节\n- 构建记录: https://github.com/%s/actions\n' "$UP_REF" "$UP" "$UP_VER" "${UP_VC:-?}" "$UP_MODE" "$UP_REF" "$SHORT" "$KIND" "$TARGET_ABI" "$SIGN" "$SHA256" "$SIZE" "$GITHUB_REPOSITORY")
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes "$NOTES"
           else
@@ -484,6 +564,8 @@ jobs:
             echo "size=$SIZE"
             echo "variant=$VARIANT"
             echo "tag=$TAG"
+            echo "ref=$UP_REF"
+            echo "version=$UP_VER"
           } >> "$GITHUB_OUTPUT"
 
   notify:
@@ -502,12 +584,14 @@ jobs:
           server_port: ${{ secrets.MAIL_SMTP_PORT }}
           username: ${{ secrets.MAIL_USERNAME }}
           password: ${{ secrets.MAIL_PASSWORD }}
-          subject: "Xime 贴底补丁版新 APK 已构建（${{ needs.build.outputs.variant }} · ${{ needs.build.outputs.sha }}）"
+          subject: "Xime 贴底补丁版新 APK 已构建（${{ needs.build.outputs.version }} · ${{ needs.build.outputs.sha }}）"
           from: ${{ secrets.MAIL_FROM }}
           to: ${{ secrets.MAIL_TO }}
           body: |
-            Xime「键盘底部贴底」补丁版 APK 已自动跟随上游更新并重新构建、发布。
+            Xime「键盘底部贴底」补丁版 APK 已自动跟随上游正式 release 重新构建、发布。
 
+            上游版本    : ${{ needs.build.outputs.version }}
+            上游引用    : ${{ needs.build.outputs.ref }}
             上游 commit : ${{ needs.build.outputs.sha }}
             构建类型    : ${{ needs.build.outputs.variant }}
             目标架构    : 仅 arm64-v8a
