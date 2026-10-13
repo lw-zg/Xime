@@ -220,3 +220,12 @@
          )
      )
  
+@@ -533,6 +554,8 @@
+ 
+     /** 返回 color_schemes 中显式定义的按键背景色，未定义返回 null。 */
+     fun getKeyBgColorOverride(themeId: String, isDark: Boolean): Color? {
++        // ── 本地补丁：内置「无键帽」主题的键面底色恒为透明（主键盘与主题预览共用此取值）
++        if (isKeycapHidden(themeId)) return Color.Transparent
+         dynamicThemeColor(themeId) { if (isDark) it.keyBgDark else it.keyBgLight }?.let { return it }
+         val entry = configOverrides[themeId] ?: return null
+         return resolveKeyBgColor(entry, isDark)

@@ -210,6 +210,7 @@ jobs:
           c3=$(grep -c -F 'backgroundColor.alpha < 0.05f' "$WS/$F3" || true)
           if [ "$c3" != "6" ]; then echo "::error::$N3 里『透明底色分支』出现 $c3 次，应为 6 次"; fail=1; fi
           if ! grep -q -F 'HIDDEN_KEYCAP_ID' "$WS/$F4"; then echo "::error::「无键帽」主题定义丢失（HIDDEN_KEYCAP_ID 未出现）"; fail=1; fi
+          if ! grep -q -F 'if (isKeycapHidden(themeId)) return Color.Transparent' "$WS/$F4"; then echo "::error::「无键帽」取色守卫丢失（getKeyBgColorOverride 未返回透明）"; fail=1; fi
           if [ "$fail" != "0" ]; then exit 1; fi
           echo "  ✓ 两处 38dp 阈值 + 去掉 18dp 兜底 + 键区内边距归零 + 底排外侧圆角 + 内置「无键帽」主题，全部到位"
           echo "── 相对上游的最终改动 ──"
