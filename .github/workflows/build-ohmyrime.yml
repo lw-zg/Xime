@@ -21,7 +21,10 @@ name: Package oh-my-rime scheme & refresh index mirror
 
 on:
   schedule:
-    - cron: '0 18 * * *'          # 每天 02:00（北京时间）
+    # 每 6 小时检查一次（北京时间 02 / 08 / 14 / 20 点）。上游 oh-my-rime 一个月才动几次，
+    # 而这个 job 只打包 + 推分支、不编译（约 1 分钟），所以提高频率几乎不花 CI；
+    # 好处是把「上游有新提交」到「App 里能装上」的间隔从 24 小时压到 6 小时以内。
+    - cron: '0 */6 * * *'
   workflow_dispatch:
     inputs:
       force:
