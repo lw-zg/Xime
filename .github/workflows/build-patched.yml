@@ -719,17 +719,21 @@ jobs:
           echo "已写入 app/keystore.properties（$(( $(wc -c < app/keystore.properties) )) 字节，不入库）"
           git status --porcelain app/keystore.properties || true
 
-      - name: ABI 收窄 init 脚本（CI 只编 ${{ env.TARGET_ABI }}，跳过其余 3 个 ABI 的 native 编译）
+      - name: ABI 收窄 init 脚本（CI 只编目标 ABI，跳过其余 3 个 ABI 的 native 编译）
         # 上游 defaultConfig.ndk.abiFilters 与 splits.abi 都列了 4 个 ABI，
         # 而本工作流只发布 arm64-v8a → 另外 3 个 ABI 的 CMake 编译（每个约 3 分钟）纯属浪费。
         # 用 --init-script 从外部收窄，**不改上游任何文件**（与版本号用 -P 回灌同一思路，避免补丁漂移）。
-        # 脚本内部全程 try/catch：万一 AGP 版本差异导致改写失败，也只打印告警、不影响构建；
-        # 产物选取步骤仍只取 ${{ env.TARGET_ABI }}，最坏情况 = 没省下时间，而非构建失败。
+        # ⚠ AGP 规则：一旦启用 ABI splits，ndk.abiFilters 就不允许与 splits 的 include 有交集
+        #   （run #20 报 "Conflicting configuration : 'arm64-v8a' in ndk abiFilters cannot be present
+        #   when splits abi filters are set : arm64-v8a"，因为两边都被我改成了 arm64-v8a）。
+        #   所以这里**只清空 abiFilters**，ABI 交给 splits.abi.include 单独决定 —— splits 驱动按 ABI
+        #   分包的 native 编译，CMake 自然只编这一个 ABI。
+        # 脚本内部全程 try/catch：万一改写失败，就原样保留上游 4:4 配置（已知可用），只告警不影响构建。
         run: |
           cat > "$RUNNER_TEMP/restrict-abi.init.gradle" <<'GRADLEEOF'
-          // CI 专用：把 ABI 收窄到 TARGET_ABI（默认 arm64-v8a）。
-          // 在 afterEvaluate 里改；init 脚本的 allprojects 注册早于构建脚本体，
-          // 因此本回调先于 AGP 自己的 afterEvaluate 执行 —— 后者才据此创建 CMake 任务。
+          // CI 专用：把 ABI 收窄到 TARGET_ABI（默认 arm64-v8a）。仅通过 --init-script 注入，不改上游文件。
+          // 时序关键：init 脚本的 allprojects 回调注册早于构建脚本体，
+          //          因此本 afterEvaluate 先于 AGP 自己的 afterEvaluate（后者才据此创建 CMake 任务）。
           final String ABITARGET = System.getenv('TARGET_ABI') ?: 'arm64-v8a'
           allprojects { proj ->
               proj.afterEvaluate {
@@ -737,24 +741,25 @@ jobs:
                       def ext = proj.extensions.findByName('android')
                       if (ext == null) return
                       def dc = ext.defaultConfig
-                      if (dc != null && dc.ndk != null) {
-                          def before = new ArrayList(dc.ndk.abiFilters)
-                          dc.ndk.abiFilters.clear()
-                          dc.ndk.abiFilters.add(ABITARGET)
-                          println "[ci-restrict-abi] ${proj.name} ndk.abiFilters ${before} -> ${dc.ndk.abiFilters}"
-                      }
+                      boolean splitsRestricted = false
                       try {
                           if (ext.splits != null && ext.splits.abi != null) {
                               ext.splits.abi.reset()
                               ext.splits.abi.include(ABITARGET)
                               ext.splits.abi.universalApk = false
+                              splitsRestricted = true
                               println "[ci-restrict-abi] ${proj.name} splits.abi -> ${ABITARGET}"
                           }
                       } catch (Throwable t) {
                           println "[ci-restrict-abi] splits.abi 改写跳过: ${t}"
                       }
+                      if (splitsRestricted && dc != null && dc.ndk != null) {
+                          def before = new ArrayList(dc.ndk.abiFilters)
+                          dc.ndk.abiFilters.clear()
+                          println "[ci-restrict-abi] ${proj.name} ndk.abiFilters ${before} -> ${dc.ndk.abiFilters}（ABI 交给 splits 决定，避免 AGP 冲突）"
+                      }
                   } catch (Throwable t) {
-                      println "[ci-restrict-abi] 收窄失败（忽略，构建照常进行）: ${t}"
+                      println "[ci-restrict-abi] 收窄失败（忽略，保持上游配置照常构建）: ${t}"
                   }
               }
           }
