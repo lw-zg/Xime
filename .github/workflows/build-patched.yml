@@ -352,6 +352,14 @@ jobs:
           if ! grep -q -F 'awaitEachGesture' "$WS/$F2"; then echo "::error::滑键改判手势丢失（awaitEachGesture 未出现）"; fail=1; fi
           if ! grep -q -F 'getKeyCommitValue(lastKey' "$WS/$F2"; then echo "::error::改判未现取 commit 值（shift 大写会失效）"; fail=1; fi
           if ! grep -q -F 'dispatchKeyActionOrPress(tap, commit' "$WS/$F2"; then echo "::error::改判未走真实按键的分发路径"; fail=1; fi
+          # 上滑出符号时不得再改判（否则「n 上滑出？」会同时敲出邻键 i）。
+          # 两个标记必须放在 remember 出来的 registry 上：普通局部 var 会被 pointerInput(Unit)
+          # 的块跨重组读成另一个引用，标记恒为 false，保护形同虚设（2026-10-14 实测事故）。
+          if ! grep -q -F 'var swipeIntent = false' "$WS/$F2"; then echo "::error::SlideKeyRegistry 缺 swipeIntent 标记（上滑出符号时会连带敲出邻键）"; fail=1; fi
+          if ! grep -q -F 'slideRegistry.swipeIntent = true' "$WS/$F2"; then echo "::error::processSwipeState 未把滑动意图写进 registry"; fail=1; fi
+          if ! grep -q -F 'val swipeIntent = slideRegistry.swipeIntent || abs(peakDy) >= swipeIntentPx' "$WS/$F2"; then echo "::error::改判条件里缺少滑动意图判定（应在改判前拦住上滑手势）"; fail=1; fi
+          if ! grep -q -F 'val swipeIntentPx = 15.dp.toPx()' "$WS/$F2"; then echo "::error::缺滑键阈值兜底（swipeIntentPx 应与按键的 15dp 一致）"; fail=1; fi
+          if grep -q -F 'slideSwipeActive' "$WS/$F2"; then echo "::error::旧的 slideSwipeActive（composable 局部 var，跨重组读不到）仍在文件里"; fail=1; fi
           # 长按气泡里也能直接挑到「上滑符号」：配置里的长按项照旧，再把上滑符号拼到末尾
           if ! grep -q -F 'longPressLabelsBase' "$WS/$F2"; then echo "::error::长按气泡未与上滑符号合并（longPressLabelsBase 未出现）"; fail=1; fi
           if ! grep -q -F 'swipeUpSymbol' "$WS/$F2"; then echo "::error::长按气泡未带上滑符号（swipeUpSymbol 未出现）"; fail=1; fi

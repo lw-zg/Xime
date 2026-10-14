@@ -46,25 +46,26 @@
  import com.kingzcheung.xime.settings.SettingsPreferences
  import com.kingzcheung.xime.ui.isTablet
  import com.kingzcheung.xime.settings.DisplayMode
-@@ -199,11 +200,17 @@
+@@ -199,11 +200,18 @@
  
      val swipeBubble = rememberSwipeBubbleController()
      var keyboardBounds by remember { mutableStateOf(Rect(0f, 0f, 0f, 0f)) }
 +    // ── 本地补丁：滑键改判（见 [SlideKeyRegistry]）──
 +    val slideRegistry = remember { SlideKeyRegistry() }
-+    // 本次按压期间是否出现过滑动手势（气泡）；出现过就放弃改判，避免与上/下滑冲突
-+    var slideSwipeActive = false
++    // 「本次按压是否已出现滑动手势」记在 slideRegistry.swipeIntent 上（跨重组稳定的对象），
++    // 不要写成 composable 的普通局部 var：pointerInput(Unit) 的块不重启，会读到另一帧的引用。
  
      // 监听手势配置版本号，部署后强制刷新键帽显示
      val cfgVer by KeysConfigHelper.configVersion.collectAsState()
  
      fun processSwipeState(state: SwipeState, bounds: Rect) {
-+        // ── 本地补丁：滑键改判 —— 出现过滑动手势就放弃改判 ──
-+        if (state.isSwiping) slideSwipeActive = true
++        // ── 本地补丁：滑键改判 —— 本次按压出现过滑动手势就放弃改判 ──
++        // 写在 slideRegistry（remember 出来的稳定对象）上，父层手势才读得到同一个值。
++        if (state.isSwiping) slideRegistry.swipeIntent = true
          val newState = if (state.isSwipeDown && state.swipeText != null) {
              state.copy(charInfos = SubcharHelper.parseSwipeDownText(state.swipeText))
          } else {
-@@ -257,12 +264,66 @@
+@@ -257,12 +265,77 @@
                  else -> (kbKey.spacingFor("qwerty").second?.dp ?: 4.25.dp)
              },
          ),
@@ -77,17 +78,26 @@
 +    // 非横向光标手势」时改判，其余情况完全走原有路径。
 +    val slideSelectModifier = Modifier.pointerInput(Unit) {
 +        val cursorActivationPx = 60.dp.toPx()
++        // 与按键自身触发上/下滑的阈值保持一致（KeyButton.kt 的 swipeUpThreshold = -15.dp）：
++        // 纵向位移一旦达到它，本次手势的意图就是「上滑出符号」，此时一律不改判。
++        // 这是不依赖按键上报的第二道保险——手指从 n 滑向右上角的 i 时，dy 早已越过 15dp，
++        // 改判不会再把 i 敲出来（用户实测：上滑「？」时问号和 i 一起出来）。
++        val swipeIntentPx = 15.dp.toPx()
 +        awaitEachGesture {
 +            slideRegistry.suppressClick = false
-+            slideSwipeActive = false
++            slideRegistry.swipeIntent = false
 +            val down = awaitFirstDown(requireUnconsumed = false)
 +            val downKey = slideRegistry.keyAt(
 +                keyboardBounds.left + down.position.x, keyboardBounds.top + down.position.y)
 +            var lastKey = downKey
++            // 本次按压期间达到过的最大纵向位移（保留符号，不取绝对值）
++            var peakDy = 0f
 +            val startAt = System.currentTimeMillis()
 +            while (true) {
 +                val event = awaitPointerEvent()
 +                val change = event.changes.firstOrNull { it.id == down.id } ?: break
++                val dyNow = change.position.y - down.position.y
++                if (abs(dyNow) > abs(peakDy)) peakDy = dyNow
 +                if (!change.pressed) {
 +                    val dx = change.position.x - down.position.x
 +                    val dy = change.position.y - down.position.y
@@ -95,8 +105,10 @@
 +                    val cursorLike = abs(dx) > cursorActivationPx && abs(dx) > abs(dy) * 4f
 +                    // 长按（重复删除/长按菜单）不改判
 +                    val quick = System.currentTimeMillis() - startAt < 500L
++                    // 上/下滑意图：按键已上报 isSwiping，或纵向位移已越过按键自身的滑键阈值
++                    val swipeIntent = slideRegistry.swipeIntent || abs(peakDy) >= swipeIntentPx
 +                    if (downKey != null && lastKey != null && lastKey != downKey &&
-+                        !cursorLike && quick && !slideSwipeActive
++                        !cursorLike && quick && !swipeIntent
 +                    ) {
 +                        slideRegistry.suppressClick = true
 +                        // 改判键的击键走与真实按键完全相同的分发：现取 commit 值（shift 大写在此生效）
@@ -131,7 +143,7 @@
              .drawWithContent {
                  drawContent()
                  bubbleData?.let { drawSwipeBubble(it) }
-@@ -286,7 +347,9 @@
+@@ -286,7 +359,9 @@
                          .fillMaxWidth()
                          .fillMaxHeight()
                          // 平板键盘两侧留边（Gboard 式不满宽），手机维持贴边紧凑
@@ -142,7 +154,7 @@
              ) {
  
                  Column(
-@@ -369,10 +432,22 @@
+@@ -369,10 +444,22 @@
                                      .fillMaxWidth((9f / firstRowSize).coerceIn(0f, 1f))
                                      .align(Alignment.CenterHorizontally)
                              } else Modifier
@@ -166,7 +178,7 @@
                              )
                          }
                      }
-@@ -563,6 +638,13 @@
+@@ -563,6 +650,13 @@
  /** 平板键面圆角下限：键圆角与阴影圆角在平板上共同对齐此值，两处解析（主键盘/分体）共享。 */
  internal val TABLET_KEY_CORNER_RADIUS = 14.dp
  
@@ -180,7 +192,7 @@
  /** 平板键面提示（数字上标、退格的「清空」等）的额外放大倍率；主键盘与面板共用同一档。 */
  internal const val TABLET_HINT_EXTRA_SCALE = 1.35f
  
-@@ -592,6 +674,28 @@
+@@ -592,6 +686,38 @@
      kbKey.spacingOverrides[keyboard]?.cornerRadius?.dp
          ?: if (isTablet) maxOf(kbKey.cornerRadius.dp, TABLET_KEY_CORNER_RADIUS) else kbKey.cornerRadius.dp
  
@@ -193,10 +205,20 @@
 + * [suppressClick] 由父层手势在「手指已进入别的键」时置位；按下键自己的点击路径
 + * （KeyButton.kt 的 onDragEnd/onTap/Release）看到后放弃触发，避免同一手势里
 + * 「按下键 + 改判键」双触发。功能键（shift/space/enter 等）不注册，行为不变。
++ *
++ * [swipeIntent] 记录本次按压期间按键是否已进入滑动手势（上/下滑出符号）。一旦置位，
++ * 父层手势就不再改判 —— 否则「n 上滑出？」时，手指沿途滑过右上角的 i，改判会把 i 也敲一遍，
++ * 表现为符号和邻键字母一起出来。
++ *
++ * ⚠ 这两个标记必须放在**这个 remember 出来的对象**上，不能放在 composable 的普通局部
++ * `var` 里：`Modifier.pointerInput(Unit)` 的块不会重启（key 恒为 Unit），它捕获的是
++ * **首次重组**那一帧的局部变量引用，而重组后 `processSwipeState` 写的是新的一帧的引用，
++ * 一读一写落在不同对象上 ⇒ 标记永远读到 false，保护形同虚设（这是「上滑同时出邻键字母」的根因）。
 + */
 +internal class SlideKeyRegistry {
 +    private val boxes = HashMap<String, Rect>()
 +    var suppressClick = false
++    var swipeIntent = false
 +    fun register(id: String, r: Rect) { boxes[id] = r }
 +    fun keyAt(x: Float, y: Float): String? {
 +        for ((id, r) in boxes) if (r.contains(Offset(x, y))) return id
@@ -209,7 +231,7 @@
  /** 主题调色板：主键盘正常路径、分体路径与面板渲染共用同一解析，防止多处取值漂移。 */
  internal data class KeyboardPalette(
      val keyboardBackgroundColor: Color,
-@@ -616,12 +720,16 @@
+@@ -616,12 +742,16 @@
      val specialKeyTextColor = KeyboardThemes.getSpecialKeyTextColorForBackground(
          specialKeyBackgroundColor, keyTextColor
      )
@@ -229,7 +251,7 @@
          bubbleBgColor = if (isDarkTheme) themeScheme.specialKeyDark else themeScheme.specialKeyLight,
      )
  }
-@@ -1495,6 +1603,7 @@
+@@ -1495,6 +1625,7 @@
      /** 手机横屏紧凑档：改用 [SwipeableKeyButtonLandscape]（主字符与上滑提示垂直堆叠、手势阈值收紧）。 */
      compactButton: Boolean = false,
  ) {
@@ -237,7 +259,7 @@
      Row(
          modifier = modifier
              .fillMaxWidth(),
-@@ -1520,13 +1629,25 @@
+@@ -1520,13 +1651,25 @@
              // 长按选项
              val longPressConfig = KeysConfigHelper.getKeyGesture(key, isAsciiMode)?.longPress
              val longPressDisplay = longPressConfig?.display ?: DisplayMode.KEY
@@ -264,7 +286,7 @@
  
              // 键帽显示文本
              val rawCommitValue = KeysConfigHelper.getKeyCommitValue(key, isAsciiMode)
-@@ -1596,9 +1717,17 @@
+@@ -1596,9 +1739,17 @@
                      }
                  }
              } else null
@@ -285,7 +307,7 @@
              } }
  
              if (compactButton) {
-@@ -1609,7 +1738,14 @@
+@@ -1609,7 +1760,14 @@
                      onClick = onClick,
                      backgroundColor = config.keyBackgroundColor,
                      textColor = config.keyTextColor,
@@ -301,7 +323,7 @@
                      swipeText = swipeUpText,
                      swipeDownText = swipeDownText,
                      swipeUpKeyLabel = swipeUpKeyLabel,
-@@ -1638,7 +1774,14 @@
+@@ -1638,7 +1796,14 @@
                  onClick = onClick,
                  backgroundColor = config.keyBackgroundColor,
                  textColor = config.keyTextColor,
@@ -317,7 +339,7 @@
                  swipeText = swipeUpText,
                  swipeDownText = swipeDownText,
                  swipeUpKeyLabel = swipeUpKeyLabel,
-@@ -1749,7 +1892,9 @@
+@@ -1749,7 +1914,9 @@
              .then(shadowModifier)
              .clip(keyClipShape)
              .background(
