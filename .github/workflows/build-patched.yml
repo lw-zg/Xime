@@ -997,6 +997,8 @@ jobs:
             printf '<!-- upstream-ref: %s -->\n' "$UP_REF"
             printf '<!-- upstream-sha: %s -->\n' "$UP"
             printf '<!-- build-mode: %s -->\n' "$UP_MODE"
+            printf '<!-- release-tag: %s -->\n' "$TAG"
+            printf '<!-- alias-tag: %s -->\n' "$ALIAS_TAG"
             printf '\n%s\n\n' "$HEADLINE"
             printf '### 键盘布局\n'
             printf -- '- 键盘底部不留白：手势导航时键区一直贴到屏幕最下边，不再空出一条；三键导航仍自动避让。\n'
@@ -1053,6 +1055,9 @@ jobs:
           else
             gh release create "$ALIAS_TAG" --repo "$GITHUB_REPOSITORY" --title "Xime 贴底补丁版 · 最新（永久链接）" --notes-file "$NOTESFILE" --prerelease
           fi
+          # 标题只在 create 时设得进去，历史 release 会一直留着旧标题 → 显式 PATCH 一次
+          AL_ID=$(gh release view "$ALIAS_TAG" --repo "$GITHUB_REPOSITORY" --json databaseId --jq .databaseId)
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$AL_ID" -f name="Xime 贴底补丁版 · 最新（永久链接）" >/dev/null
           gh release upload "$ALIAS_TAG" "$ALIAS" --repo "$GITHUB_REPOSITORY" --clobber
           echo "已更新永久链接: https://github.com/$GITHUB_REPOSITORY/releases/download/$ALIAS_TAG/$ALIAS"
           {
