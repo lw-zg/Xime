@@ -357,6 +357,8 @@ jobs:
           # SymbolKeyboardLayout.kt：全量符号浮层返回键从顶部导航区搬到左下角
           if grep -q -F '// 导航区：返回按钮' "$WS/$F9"; then echo "::error::符号浮层顶部导航区还在（返回键没搬走）"; fail=1; fi
           if ! grep -q -F '本地补丁：返回键挪到左下角' "$WS/$F9"; then echo "::error::符号浮层左下角返回键丢失"; fail=1; fi
+          # bug#3：符号浮层返回键加大到 52dp（原先 28dp 太小、单手难点中）
+          if ! grep -q -F 'size(52.dp)' "$WS/$F9"; then echo "::error::bug#3 符号浮层返回键未加大到 52dp（原先 28dp 太小）"; fail=1; fi
           c10=$(grep -c -F 'contentDescription = "返回"' "$WS/$F9" || true)
           if [ "$c10" != "1" ]; then echo "::error::符号浮层返回键应只剩 1 处（搬移不是复制），实际 $c10 处"; fail=1; fi
           c11=$(grep -c -F 'onBack()' "$WS/$F9" || true)
