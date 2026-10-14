@@ -237,7 +237,55 @@
      Row(
          modifier = modifier
              .fillMaxWidth(),
-@@ -1609,7 +1718,14 @@
+@@ -1520,13 +1629,25 @@
+             // 长按选项
+             val longPressConfig = KeysConfigHelper.getKeyGesture(key, isAsciiMode)?.longPress
+             val longPressDisplay = longPressConfig?.display ?: DisplayMode.KEY
+-            val longPressLabels = if (longPressDisplay == DisplayMode.BUBBLE) {
++            val longPressLabelsBase = if (longPressDisplay == DisplayMode.BUBBLE) {
+                 longPressConfig?.let { KeysConfigHelper.longPressDisplayItems(it) }
+                     ?.ifEmpty { null }
+             } else null
+             val longPressGestureMap = if (longPressDisplay == DisplayMode.BUBBLE) {
+                 longPressConfig?.let { KeysConfigHelper.longPressActionMap(it) }
+             } else null
++            // ── 本地补丁：长按气泡里并入「上滑符号」──
++            // 键面上滑可得的符号（如 q→"1"、n→"?"）在既有长按气泡末尾追加为候选项，
++            // 便于「长按 + 左右滑」直接选取。仅在键已有长按气泡、该键上滑未被显式禁用
++            // （action:none）、且上滑有可提交值时追加；追加在末尾 ⇒「长按即选中首项」不变。
++            val swipeUpSymbol = rawSwipeUpLabel?.takeIf {
++                it.isNotEmpty() && swipeUpAction != GestureAction.NONE && swipeUpCommitValue != null
++            }
++            val longPressLabels = if (longPressLabelsBase != null && swipeUpSymbol != null &&
++                swipeUpSymbol !in longPressLabelsBase
++            ) {
++                longPressLabelsBase + swipeUpSymbol
++            } else longPressLabelsBase
+ 
+             // 键帽显示文本
+             val rawCommitValue = KeysConfigHelper.getKeyCommitValue(key, isAsciiMode)
+@@ -1596,9 +1717,17 @@
+                     }
+                 }
+             } else null
+-            val onLongPressSelect: ((String) -> Unit)? = remember(key, longPressGestureMap, onGestureAction, onCommitText, onKeyPress) { { selectedLabel: String ->
+-                dispatchLongPressSelection(
+-                    selectedLabel, longPressGestureMap, onKeyPress, onCommitText, onGestureAction)
++            val onLongPressSelect: ((String) -> Unit)? = remember(
++                key, longPressGestureMap, onGestureAction, onCommitText, onKeyPress,
++                longPressLabelsBase, swipeUpSymbol, onSwipeUp
++            ) { { selectedLabel: String ->
++                // ── 本地补丁：气泡里的「上滑符号」选中时，走与真实上滑相同的提交路径 ──
++                if (longPressLabelsBase != null && swipeUpSymbol != null && selectedLabel == swipeUpSymbol) {
++                    onSwipeUp?.invoke(swipeUpSymbol)
++                } else {
++                    dispatchLongPressSelection(
++                        selectedLabel, longPressGestureMap, onKeyPress, onCommitText, onGestureAction)
++                }
+             } }
+ 
+             if (compactButton) {
+@@ -1609,7 +1738,14 @@
                      onClick = onClick,
                      backgroundColor = config.keyBackgroundColor,
                      textColor = config.keyTextColor,
@@ -253,7 +301,7 @@
                      swipeText = swipeUpText,
                      swipeDownText = swipeDownText,
                      swipeUpKeyLabel = swipeUpKeyLabel,
-@@ -1638,7 +1754,14 @@
+@@ -1638,7 +1774,14 @@
                  onClick = onClick,
                  backgroundColor = config.keyBackgroundColor,
                  textColor = config.keyTextColor,
@@ -269,7 +317,7 @@
                  swipeText = swipeUpText,
                  swipeDownText = swipeDownText,
                  swipeUpKeyLabel = swipeUpKeyLabel,
-@@ -1749,7 +1872,9 @@
+@@ -1749,7 +1892,9 @@
              .then(shadowModifier)
              .clip(keyClipShape)
              .background(
@@ -691,7 +739,42 @@
      val displayText = if (isLongPressMode) null
 --- a/app/src/main/java/com/kingzcheung/xime/ui/keyboard/SymbolKeyboardLayout.kt
 +++ b/app/src/main/java/com/kingzcheung/xime/ui/keyboard/SymbolKeyboardLayout.kt
-@@ -107,33 +107,6 @@
+@@ -15,17 +15,14 @@
+ import androidx.compose.foundation.layout.fillMaxWidth
+ import androidx.compose.foundation.layout.height
+ import androidx.compose.foundation.layout.padding
+-import androidx.compose.foundation.layout.size
+ import androidx.compose.foundation.layout.width
+ import androidx.compose.foundation.pager.HorizontalPager
+ import androidx.compose.foundation.pager.rememberPagerState
+ import androidx.compose.foundation.rememberScrollState
+-import androidx.compose.foundation.shape.CircleShape
+ import androidx.compose.foundation.shape.RoundedCornerShape
+ import androidx.compose.foundation.verticalScroll
+ import androidx.compose.material.icons.Icons
+ import androidx.compose.material.icons.filled.KeyboardArrowLeft
+-import androidx.compose.material3.Icon
+ import androidx.compose.material3.Text
+ import androidx.compose.runtime.Composable
+ import androidx.compose.runtime.CompositionLocalProvider
+@@ -36,6 +33,7 @@
+ import androidx.compose.ui.Modifier
+ import androidx.compose.ui.draw.clip
+ import androidx.compose.ui.graphics.Color
++import androidx.compose.ui.graphics.vector.rememberVectorPainter
+ import androidx.compose.ui.platform.LocalContext
+ import androidx.compose.ui.text.style.TextAlign
+ import androidx.compose.ui.unit.dp
+@@ -82,8 +80,6 @@
+         listOf(SymbolCategory(name = "最近使用", id = "recentSymbols", symbols = recentSymbols)) +
+             SymbolData.categories
+     }
+-    // 图标按钮容器色 = 功能键底色（与面板的返回/删除键同色，不再自造 lerp 色调）
+-    val iconButtonContainer = specialKeyBgColor
+     val scope = rememberCoroutineScope()
+ 
+     val pagerState = rememberPagerState(
+@@ -107,33 +103,6 @@
              .background(backgroundColor)
              .padding(outerPadding)
      ) {
@@ -725,7 +808,7 @@
          // 内容区：符号网格 + HorizontalPager
          Box(
              modifier = Modifier
-@@ -197,7 +170,7 @@
+@@ -197,7 +166,7 @@
              }
          }
  
@@ -734,30 +817,35 @@
          Row(
              modifier = Modifier
                  .fillMaxWidth()
-@@ -205,6 +178,26 @@
+@@ -205,6 +174,21 @@
              horizontalArrangement = Arrangement.spacedBy(columnGap),
              verticalAlignment = Alignment.CenterVertically
          ) {
 +            // ── 本地补丁：返回键挪到左下角（原先在顶部导航区，单手拇指够不着）──
-+            Box(
-+                modifier = Modifier
-+                    .size(52.dp)
-+                    .clip(CircleShape)
-+                    .background(iconButtonContainer)
-+                    .tolerantClick {
-+                        onHapticFeedback?.invoke()
-+                        onBack()
-+                    },
-+                contentAlignment = Alignment.Center
-+            ) {
-+                Icon(
-+                    imageVector = Icons.Default.KeyboardArrowLeft,
-+                    contentDescription = "返回",
-+                    tint = textColor,
-+                    modifier = Modifier.size(40.dp)
-+                )
-+            }
++            // 改用与「删除」同一套键样式（IconKeyButton）：同宽 48dp、同圆角/投影/内衬 ⇒ 左右对称。
++            IconKeyButton(
++                icon = rememberVectorPainter(Icons.Default.KeyboardArrowLeft),
++                onClick = {
++                    onHapticFeedback?.invoke()
++                    onBack()
++                },
++                backgroundColor = specialKeyBgColor,
++                iconColor = specialKeyTextColor,
++                modifier = Modifier.width(48.dp),
++                iconSize = 22.dp,
++                a11yDescription = "返回"
++            )
 +
              Row(
                  modifier = Modifier
                      .weight(1f)
+@@ -221,7 +205,8 @@
+                         },
+                         backgroundColor = backgroundColor,
+                         textColor = textColor,
+-                        selectedBackgroundColor = accentColor
++                        // ── 本地补丁：选中底色调浅（原先用不透明 accentColor，过重像一块阴影）──
++                        selectedBackgroundColor = accentColor.copy(alpha = 0.20f)
+                     )
+                 }
+             }
