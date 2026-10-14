@@ -3990,8 +3990,8 @@
 +                                            // 仅预览：松手提交正常击键，不改出字
 +
 +                                            if (slideRegistry?.suppressClick != true) currentOnClick()
-+
-+                                        } else {
++                                        }
++                                        else {
 +                                        val selected = items.getOrNull(selectedIdx)
 +                                        if (selected != null) {
 +                                            currentOnLongPressSelect?.invoke(selected)
