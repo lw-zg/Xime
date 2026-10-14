@@ -1,22 +1,31 @@
 # 跟随上游 ximeiorg/Xime 自动构建「键盘底部贴底」补丁版 APK
 #
-# ── 触发策略：release 才编译；源码始终跟上游最新 ────────────────────────
-# 上游平时往 main 推的 commit，我们**随时可以拉取**（编译就直接检出 main 的最新提交）；
-# 但**只有当上游发布正式 release**（GitHub 的 releases/latest，天然排除 nightly 这类
-# prerelease 与 draft）时，才真正**开始编译** —— 用 release 的 tag 变化当「闸门」。
-# 编译时源码取上游 **main 最新提交**，并把它在 app/build.gradle.kts 里声明的**上游版本号**
-# （versionName / versionCode）显式回灌进产物，保证版本号与上游同步。
-# 为何检出 main 而不是 release 的 tag：patch-base/ 是对着 main 快照生成的，检出更旧的 tag
-# 会让三方合并反向而冲突；而且需求本身是「有新 commit 可以拉取」。
-# 需要提前验证某个未发布的提交时，手动触发并填 `ref`（如某 tag / 分支）即可 ——
-# 这时源码与版本号都以该 `ref` 为准。
+# ── 触发策略：等上游发正式 release 才编译 ──────────────────────────────
+# 「闸门」= 上游最新正式 release 的 tag（releases/latest，天然排除 nightly 这类 prerelease
+# 与 draft）。只有它变了（或补丁基准刚刚对齐到它）才真正开始编译。
+#
+# 「构建源」= 与补丁基准对齐的那个 release tag：
+#   patch-base/UPSTREAM_BASE 记着 patch-base/ 对应上游哪个引用。只有它与最新正式版相等时，
+#   才把构建源定成该 tag —— 版本号于是诚实地等于上游正式版（如 v3.2.0）。
+#   三方合并要求 patch-base 必须是检出提交的祖先，方向反了必然冲突（run #14 的教训），
+#   所以基准还没对齐到新版本时，构建源退回上游 main，并在标题/说明里**明确标注
+#   「上游 main @commit，该版本上游尚未发布」**，绝不冒充正式版。
+#   上游发新版后，把补丁基准重新生成到该 tag，下一次构建就会自动切到 release 轨道
+#  （check 里比对 build-mode，会自动补一次 release 轨道的构建）。
+# 需要提前验证某个提交时，手动触发并填 `ref`（tag / 分支 / commit）即可。
 #
 # ── 产物 ───────────────────────────────────────────────────────────────
 # 默认构建 **release**（R8 精简 + 资源压缩），且只打包 **arm64-v8a**，用**固定密钥**签名：
-#   · release   -> Release 标签 `patched-apk`        （永久链接，可覆盖安装升级）
-#   · debug     -> Release 标签 `patched-apk-debug`  （手动触发时的备用路径）
-# 资产名带上游版本号（`xime-patched-release-3.1.0-arm64-v8a.apk`），同时保留一个不带版本号的
-# **稳定别名**（`xime-patched-release-arm64-v8a.apk`）—— 永久链接始终指向最新版，不会因改名失效。
+#   · release   -> 正式版（可覆盖安装升级）
+#   · debug     -> 调试版（手动触发时的备用路径）
+# 发布分两处，**每个版本一个独立 release，旧版本原样保留、永不覆盖**：
+#   · 版本化 Release：release 轨道 `patched-v<上游版本>`（如 `patched-v3.2.0`）；
+#                     main 轨道   `patched-main-<日期>-<短sha>`（标题写明「未发布」）。
+#     属正式 release、参与 releases/latest；资产名带版本号
+#     （`xime-patched-release-3.2.0-arm64-v8a.apk`），一看就知道是哪一版。
+#   · 滚动别名 Release：`patched-apk` / `patched-apk-debug`，刻意标为 prerelease 不抢 latest，
+#     只放不带版本号的**稳定别名**（`xime-patched-release-arm64-v8a.apk`），
+#     让永久下载链接始终有效、不会因改名失效。
 # 只取 arm64-v8a 一个架构：现代手机都是它，能省掉另外 3 份 native 库（约 35 MB×3）。
 # ⚠ 曾经踩过的坑：以前用 `find ... | head -1` 随手取一个 APK，结果发布出去的是 **x86_64**
 #   那一份（真机装上去加载不到 librime 会崩）。现在改成按 TARGET_ABI 明确挑选，
@@ -62,7 +71,7 @@ on:
           - debug
         default: release
       ref:
-        description: '手动指定上游源码引用（留空 = 上游 main 最新提交；可填某 tag/分支以构建指定提交，版本号随之取该引用）'
+        description: '手动指定上游源码引用（留空 = 自动：基准已对齐最新正式版就用该 tag，否则用 main 最新提交；可填某 tag/分支，版本号随之取该引用）'
         required: false
         type: string
         default: ''
@@ -91,8 +100,9 @@ jobs:
       mode: ${{ steps.decide.outputs.mode }}
       variant: ${{ steps.decide.outputs.variant }}
       tag: ${{ steps.decide.outputs.tag }}
+      alias: ${{ steps.decide.outputs.alias }}
     steps:
-      - name: 以上游正式 release 为闸门；构建源取 main 最新提交并同步版本号
+      - name: 闸门＝上游正式 release；构建源＝与补丁基准对齐的那个 release tag（未对齐时退回 main 并标注未发布）
         id: decide
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -101,7 +111,8 @@ jobs:
           UP=ximeiorg/Xime
           VARIANT="${{ github.event.inputs.variant }}"
           [ -n "$VARIANT" ] || VARIANT=release
-          if [ "$VARIANT" = "debug" ]; then TAG=patched-apk-debug; else TAG=patched-apk; fi
+          # 滚动别名标签：永久下载链接靠它，同时也用它记录「上次编译时的上游 release / 轨道」。
+          if [ "$VARIANT" = "debug" ]; then ALIAS_TAG=patched-apk-debug; else ALIAS_TAG=patched-apk; fi
           MREF="${{ github.event.inputs.ref }}"
 
           # ① 「闸门」= 上游最新正式 release 的 tag。
@@ -110,9 +121,27 @@ jobs:
           REL=$(gh api "repos/$UP/releases/latest" --jq .tag_name 2>/dev/null || true)
           [ -n "$REL" ] || REL="<none>"
 
-          # ② 「构建源」= 上游 main 最新提交（有新 commit 随时可拉取）；手动指定则用 ref。
-          if [ -n "$MREF" ]; then REF="$MREF"; MODE=manual; else REF=main; MODE=release; fi
+          # ② 「补丁基准」记录在 patch-base/UPSTREAM_BASE 里：写着 patch-base/ 对应上游哪个引用。
+          #    只有它与 REL 相等时才敢把构建源定成该 release tag —— 三方合并要求 patch-base 必须是
+          #    检出提交的祖先，方向反了就会冲突（run #14 的教训）。未对齐时退回上游 main，
+          #    并在标题/说明里照实标注「上游 main、该版本尚未发布」，绝不冒充正式版。
+          BASE_REF=$(gh api "repos/$GITHUB_REPOSITORY/contents/patch-base/UPSTREAM_BASE?ref=main" \
+                       -H "Accept: application/vnd.github.raw" 2>/dev/null | tr -d '\r\n' || true)
+          BASE_REF=$(printf '%s' "$BASE_REF" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
+          echo "补丁基准 = ${BASE_REF:-<未记录>}"
+
+          # ③ 「构建源」：手动指定优先；否则基准与最新正式版对齐就走 release tag，没对齐就退回 main。
+          if [ -n "$MREF" ]; then
+            REF="$MREF"; MODE=manual
+          elif [ "$REL" != "<none>" ] && [ "$BASE_REF" = "$REL" ]; then
+            REF="$REL"; MODE=release
+          else
+            REF=main; MODE=main
+          fi
           echo "上游正式 release = $REL ；本次构建源 = $REF（$MODE 轨道）"
+          if [ "$MODE" = "main" ] && [ "$BASE_REF" != "main" ]; then
+            echo "::notice::补丁基准（${BASE_REF:-未记录}）与最新正式版（$REL）尚未对齐：本次按上游 main 构建，产物标注为「未发布」。把补丁基准重新生成到 $REL 后会自动切回 release 轨道。"
+          fi
 
           # 解析该引用指向的提交（tag 优先解引用 ^{}，退而求其次直接取 tag / 分支）
           SHA=$(git ls-remote "https://github.com/$UP.git" "refs/tags/$REF^{}" | cut -f1 || true)
@@ -121,7 +150,7 @@ jobs:
           [ -n "$SHA" ] || { echo "::error::无法解析上游引用 $REF"; exit 1; }
           echo "上游 $REF = $SHA"
 
-          # ③ 真正「同步上游版本号」：直接从**构建源**的 app/build.gradle.kts 里读
+          # ④ 真正「同步上游版本号」：直接从**构建源**的 app/build.gradle.kts 里读
           GURL="repos/$UP/contents/app/build.gradle.kts?ref=$REF"
           GRADLE=$(gh api "$GURL" -H "Accept: application/vnd.github.raw" 2>/dev/null || true)
           VER=$(printf '%s\n' "$GRADLE" | grep -oE 'versionName[[:space:]]*=[[:space:]]*"[^"]+"' | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
@@ -129,9 +158,22 @@ jobs:
           if [ -z "$VER" ]; then echo "::error::无法从 $REF 的 app/build.gradle.kts 读取 versionName"; exit 1; fi
           echo "上游版本 = $VER (versionCode ${VC:-<未读到>})"
 
-          # ④ 比对的是**闸门（release tag）**，不是构建源 —— 否则恒等于 main 会永远跳过
-          LASTREL=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body 2>/dev/null | grep -o 'upstream-release: [^ ]*' | head -1 | cut -d' ' -f2 || true)
-          echo "上次编译时的上游 release = ${LASTREL:-<无记录>}"
+          # ⑤ 版本化发布标签：**每个版本一个独立 release，旧版本保留不被覆盖**。
+          #    · release 轨道  -> patched-v<上游版本>        例：patched-v3.2.0
+          #    · main/手动轨道 -> patched-main-<日期>-<短sha> 例：patched-main-20261014-b52626f
+          #    另有滚动别名 release（$ALIAS_TAG）只放稳定文件名，保证永久下载链接不变。
+          if [ "$MODE" = "release" ]; then
+            TAG="patched-v$VER"
+          else
+            TAG="patched-main-$(date -u +%Y%m%d)-$(printf '%s' "$SHA" | cut -c1-7)"
+          fi
+          echo "本次发布标签 = $TAG （滚动别名 = $ALIAS_TAG）"
+
+          # ⑥ 比对「上次编译时的上游 release」——记录写在滚动别名 release 的说明里（它每次都更新）
+          LASTBODY=$(gh release view "$ALIAS_TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body 2>/dev/null || true)
+          LASTREL=$(printf '%s\n' "$LASTBODY" | grep -o 'upstream-release: [^ ]*' | head -1 | cut -d' ' -f2 || true)
+          LASTMODE=$(printf '%s\n' "$LASTBODY" | grep -o 'build-mode: [^ ]*' | head -1 | cut -d' ' -f2 || true)
+          echo "上次编译：上游 release = ${LASTREL:-<无记录>}，轨道 = ${LASTMODE:-<无记录>}"
 
           {
             echo "rel=$REL"
@@ -142,6 +184,7 @@ jobs:
             echo "mode=$MODE"
             echo "variant=$VARIANT"
             echo "tag=$TAG"
+            echo "alias=$ALIAS_TAG"
           } >> "$GITHUB_OUTPUT"
           if [ "${{ github.event.inputs.force }}" = "true" ]; then
             echo "手动强制构建"
@@ -152,12 +195,17 @@ jobs:
           elif [ "$REL" = "<none>" ]; then
             echo "上游尚无正式 release，本次跳过（手动触发可加 force 或指定 ref）"
             echo "build=false" >> "$GITHUB_OUTPUT"
-          elif [ "$REL" = "$LASTREL" ]; then
-            echo "上游正式 release 未变化（$REL），跳过构建"
-            echo "build=false" >> "$GITHUB_OUTPUT"
-          else
+          elif [ "$REL" != "$LASTREL" ]; then
             echo "上游有新正式 release（$REL），开始构建"
             echo "build=true" >> "$GITHUB_OUTPUT"
+          elif [ "$MODE" = "release" ] && [ "$LASTMODE" != "release" ]; then
+            # 上游 release 没变，但补丁基准刚刚对齐到了它 —— 补一次 release 轨道的构建，
+            # 让版本标签从 patched-main-* 换成 patched-v*。（对齐前的那次 main 构建不会被覆盖，仍在。）
+            echo "补丁基准已对齐到 $REL，补一次 release 轨道构建"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "上游正式 release 未变化（$REL），跳过构建"
+            echo "build=false" >> "$GITHUB_OUTPUT"
           fi
 
   build:
@@ -304,6 +352,10 @@ jobs:
           if ! grep -q -F 'awaitEachGesture' "$WS/$F2"; then echo "::error::滑键改判手势丢失（awaitEachGesture 未出现）"; fail=1; fi
           if ! grep -q -F 'getKeyCommitValue(lastKey' "$WS/$F2"; then echo "::error::改判未现取 commit 值（shift 大写会失效）"; fail=1; fi
           if ! grep -q -F 'dispatchKeyActionOrPress(tap, commit' "$WS/$F2"; then echo "::error::改判未走真实按键的分发路径"; fail=1; fi
+          # 长按气泡里也能直接挑到「上滑符号」：配置里的长按项照旧，再把上滑符号拼到末尾
+          if ! grep -q -F 'longPressLabelsBase' "$WS/$F2"; then echo "::error::长按气泡未与上滑符号合并（longPressLabelsBase 未出现）"; fail=1; fi
+          if ! grep -q -F 'swipeUpSymbol' "$WS/$F2"; then echo "::error::长按气泡未带上滑符号（swipeUpSymbol 未出现）"; fail=1; fi
+          if ! grep -q -F 'onSwipeUp?.invoke(swipeUpSymbol)' "$WS/$F2"; then echo "::error::气泡里选中上滑符号后未走真实上滑提交路径"; fail=1; fi
           # KeyButton.kt：透明底色分支应出现 6 次（crispShadowColor 1 处 + 5 个键面站点）
           c3=$(grep -c -F 'backgroundColor.alpha < 0.05f' "$WS/$F3" || true)
           if [ "$c3" != "6" ]; then echo "::error::$N3 里『透明底色分支』出现 $c3 次，应为 6 次"; fail=1; fi
@@ -357,9 +409,16 @@ jobs:
           # SymbolKeyboardLayout.kt：全量符号浮层返回键从顶部导航区搬到左下角
           if grep -q -F '// 导航区：返回按钮' "$WS/$F9"; then echo "::error::符号浮层顶部导航区还在（返回键没搬走）"; fail=1; fi
           if ! grep -q -F '本地补丁：返回键挪到左下角' "$WS/$F9"; then echo "::error::符号浮层左下角返回键丢失"; fail=1; fi
-          # bug#3：符号浮层返回键加大到 52dp（原先 28dp 太小、单手难点中）
-          if ! grep -q -F 'size(52.dp)' "$WS/$F9"; then echo "::error::bug#3 符号浮层返回键未加大到 52dp（原先 28dp 太小）"; fail=1; fi
-          c10=$(grep -c -F 'contentDescription = "返回"' "$WS/$F9" || true)
+          # bug#3 的最终形态：返回键改用与「删除」同一套 IconKeyButton（同宽 48dp、同圆角/投影）⇒ 左右对称。
+          # ⚠ 曾经这里断言的是旧实现 `size(52.dp)`（顶部导航区的圆形返回键）。实现换成 IconKeyButton 后
+          #   该断言恒假、每次构建都在「套用补丁」这步红掉（run #28），所以改成断言新形态：
+          if ! grep -q -F 'IconKeyButton(' "$WS/$F9"; then echo "::error::符号浮层返回键未改用 IconKeyButton（与删除键不对称）"; fail=1; fi
+          if ! grep -q -F 'Icons.Default.KeyboardArrowLeft' "$WS/$F9"; then echo "::error::符号浮层返回键图标丢失（KeyboardArrowLeft）"; fail=1; fi
+          if ! grep -q -F 'modifier = Modifier.width(48.dp),' "$WS/$F9"; then echo "::error::符号浮层返回键不是 48dp 宽（与删除键不等宽）"; fail=1; fi
+          if grep -q -F 'size(52.dp)' "$WS/$F9"; then echo "::error::旧的 52dp 圆形返回键还在（应已换成 IconKeyButton）"; fail=1; fi
+          # 「最近使用」Tab 选中底色：由不透明的 accentColor 调浅成 20% 透明（原来像一块阴影）
+          if ! grep -q -F 'selectedBackgroundColor = accentColor.copy(alpha = 0.20f)' "$WS/$F9"; then echo "::error::「最近使用」选中底色未调浅（应为 accentColor.copy(alpha = 0.20f)）"; fail=1; fi
+          c10=$(grep -c -F 'a11yDescription = "返回"' "$WS/$F9" || true)
           if [ "$c10" != "1" ]; then echo "::error::符号浮层返回键应只剩 1 处（搬移不是复制），实际 $c10 处"; fail=1; fi
           c11=$(grep -c -F 'onBack()' "$WS/$F9" || true)
           if [ "$c11" != "1" ]; then echo "::error::符号浮层 onBack() 调用应只剩 1 处，实际 $c11 处"; fail=1; fi
@@ -884,12 +943,13 @@ jobs:
           path: app/build/outputs/apk/${{ needs.check.outputs.variant }}/*.apk
           retention-days: 30
 
-      - name: 发布到 Release（固定标签，永久链接）
+      - name: 发布到 Release（每个版本一个独立 release，旧版本保留）
         id: publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VARIANT: ${{ needs.check.outputs.variant }}
           TAG: ${{ needs.check.outputs.tag }}
+          ALIAS_TAG: ${{ needs.check.outputs.alias }}
           UP_REL: ${{ needs.check.outputs.rel }}
           UP_REF: ${{ needs.check.outputs.ref }}
           UP_VER: ${{ needs.check.outputs.version }}
@@ -909,35 +969,94 @@ jobs:
           SHORT=$(git rev-parse --short HEAD)
           SHA256=$(sha256sum "$OUT" | cut -d' ' -f1)
           SIZE=$(stat -c%s "$OUT")
-          if [ "$VARIANT" = "release" ]; then
-            TITLE="Xime 贴底补丁版 · ${UP_VER:-$SHORT}（arm64，自动跟随上游 release）"
-            KIND="release（R8 精简 + 资源压缩）"
-            SIGN="固定密钥签名（密钥存在本仓库 Secrets 里）—— 以后**可直接覆盖安装升级，不会丢 Rime 数据**"
+          DATE=$(date -u +%Y%m%d)
+
+          # ── 轨道决定措辞：只有「构建源就是上游正式 release tag」时才敢写成正式版；
+          #    退回 main 构建时必须写明「上游尚未发布」，绝不冒充正式版。
+          if [ "$UP_MODE" = "release" ]; then
+            HEADLINE="跟随上游 ximeiorg/Xime 的正式版 ${UP_REL} 自动构建的「键盘底部贴底」补丁版。"
+            TITLE="Xime 贴底补丁版 v${UP_VER}（arm64，跟随上游正式版 ${UP_REL}）"
           else
-            TITLE="Xime 贴底补丁版 · debug（arm64，自动跟随上游 release）"
+            HEADLINE="本版跟随上游 ximeiorg/Xime 的 **main 最新提交** 构建：上游 gradle 里写的版本号是 ${UP_VER}，但该版本**上游还没有正式发布**（最新正式版是 ${UP_REL}），所以本包是开发中的主线版，不是正式版。"
+            TITLE="Xime 贴底补丁版 · 主线预览（上游 main @${SHORT}，${UP_VER} 尚未发布）"
+          fi
+          if [ "$VARIANT" = "release" ]; then
+            KIND="release（R8 精简 + 资源压缩）"
+            SIGN="固定密钥签名（密钥存在本仓库 Secrets 里）—— 以后可直接覆盖安装升级，不会丢 Rime 数据"
+          else
+            TITLE="$TITLE · debug"
             KIND="debug"
             SIGN="调试密钥（每次构建可能不同）—— 更新前需要先卸载"
           fi
-          NOTES=$(printf '跟随上游 ximeiorg/Xime 自动构建的「键盘底部贴底」补丁版。\n\n<!-- upstream-release: %s -->\n<!-- upstream-ref: %s -->\n<!-- upstream-sha: %s -->\n\n- 触发 release: `%s`\n- 上游版本: `%s`（versionCode %s，%s 轨道）\n- 上游源码引用: `%s`（有新 commit 即随 main 拉取）\n- 上游 commit: `%s`\n- 构建类型: %s\n- 目标架构: 仅 `%s`（现代手机适用；其他架构请改工作流的 TARGET_ABI）\n- 补丁: 手势导航下键区贴到屏幕底边（inset ≤ 38dp 不留白；三键导航仍避让）\n- 误触修复: 拇指指腹先触发的行不再抢先输出——松手时按手指最终落点改判按键；上滑/长按/光标手势不受影响\n- 无键帽模式: 主题设置里新增总开关，**对所有主题生效**；开启后键面完全不画底色也**不画边框**（与主题选择页的预览一致，只留文字/图标），按下/高亮时给出提示；关闭后各主题观感不变。原先那个叫「无键帽」的配色主题已**从主题列表删除**（有了总开关就多余了）——老用户若正选着它，首次启动会自动切回默认主题并把这个开关打开，观感不变\n- 键位调整: qwerty / qwerty_en / qwerty_tablet / qwerty_en_tablet 四个键盘段的 **v 键上滑与 n 键上滑对调（？ ↔ ％）**\n- 新增主题: 在「沉稳石墨」基础上加了一个纯黑变体 **「石墨纯黑」**——只把深色模式的键盘底色由深灰 `0x1A1A1A` 换成纯黑 `0x000000`（AMOLED 屏更省电、熄灯更彻底），其余配色与「沉稳石墨」逐项一致，主题列表里可直接切换\n- 按键气泡: 按压气泡与上滑/下滑提示气泡已**去掉**（主键盘/面板/T9/笔画通用）；长按选择弹窗保留——它承担滑动挑选变体的视觉反馈，去掉会长按选字变成盲选\n- 符号页返回键: 全量符号浮层的返回键从**左上角**挪到**左下角**（底部行行首，圆形 ← 外观与行为不变），单手拇指更够得着；分类 Tab 与删除键位置不变\n- 内置方案市场: `assets/xime.yaml` 的 `base_urls` 顶部加入自建镜像（含 **oh-my-rime 薄荷拼音**等额外方案，可在「输入方案」里一键下载安装）；官方镜像保留作后备\n- 融合方式: 三方合并（自动适配上游改动），冲突时构建会失败并给出冲突片段\n- 包名: com.kingzcheung.xime —— 与官方同包名，首次安装前必须先卸载官方版\n- 签名: %s\n- sha256: `%s`\n- 大小: %s 字节\n- 资产: %s（带版本号）/ %s（稳定别名，永久链接不变）\n- 构建记录: https://github.com/%s/actions\n' "$UP_REL" "$UP_REF" "$UP" "$UP_REL" "$UP_VER" "${UP_VC:-?}" "$UP_MODE" "$UP_REF" "$SHORT" "$KIND" "$TARGET_ABI" "$SIGN" "$SHA256" "$SIZE" "$OUT" "$ALIAS" "$GITHUB_REPOSITORY")
-          # 正式版 Release（不是 prerelease）——这样 GitHub 主页右侧的 Releases 栏
-          # 与 releases/latest 都会指向这个「可下载的最新编译版」，而不是被每 6 小时自动
-          # 更新的方案包 prerelease 抢走（方案包刻意保持 prerelease，不参与 latest 计算）。
+
+          # gh release edit 只改 notes、不改标题，所以标题单独 PATCH 一次。
+          # 说明一律写进文件再 --notes-file 传：多行长文本直接塞命令行参数容易被 shell 重新解释。
+          NOTESFILE="$RUNNER_TEMP/release-notes.md"
+          {
+            printf '<!-- upstream-release: %s -->\n' "$UP_REL"
+            printf '<!-- upstream-ref: %s -->\n' "$UP_REF"
+            printf '<!-- upstream-sha: %s -->\n' "$UP"
+            printf '<!-- build-mode: %s -->\n' "$UP_MODE"
+            printf '\n%s\n\n' "$HEADLINE"
+            printf '### 键盘布局\n'
+            printf -- '- 键盘底部不留白：手势导航时键区一直贴到屏幕最下边，不再空出一条；三键导航仍自动避让。\n'
+            printf -- '- 键盘底部两个外角顺着屏幕圆角收进去，不再被切一刀。\n'
+            printf -- '- 符号页的返回键从左上角挪到左下角，单手拇指够得着；宽度和圆角跟「删除」键一致，左右对称。\n'
+            printf -- '- 长按弹出的气泡里也能直接挑「上滑符号」了（原来只有直接上滑才出得来）。\n'
+            printf -- '- 去掉了按键气泡（按住时弹出的那个小浮层），打字时更干净；长按选字的弹窗保留。\n'
+            printf '\n### 外观\n'
+            printf -- '- 新增「无键帽模式」总开关：打开后所有主题的键面都不画底色、不画边框，只留文字和图标；按下时给一层很淡的提示色。\n'
+            printf -- '- 原来那个叫「无键帽」的配色主题已从主题列表里删掉（有总开关就多余了）。老用户第一次启动会自动切回默认主题并打开这个开关，观感不变。\n'
+            printf -- '- 新增主题「石墨纯黑」：在「沉稳石墨」基础上把深色键盘底换成纯黑，AMOLED 屏更省电。\n'
+            printf -- '- 主题页「最近使用」的选中底色调浅了，不再像压着一块阴影。\n'
+            printf '\n### 打字手感\n'
+            printf -- '- 修了大拇指误触：手指按在 A 键、指腹压到旁边的 S 键时，原先会先出 S；现在松手按最终落点判定，落在哪个键就出哪个键。\n'
+            printf '\n### 输入方案\n'
+            printf -- '- qwerty 与 qwerty_en 键盘的 v 键上滑和 n 键上滑互换（？ ↔ ％）。\n'
+            printf -- '- 内置方案市场加了自建镜像，可以直接下载安装薄荷拼音等额外方案；官方镜像保留作后备。\n'
+            printf '\n### 怎么装\n'
+            printf -- '- 包名与官方版相同（com.kingzcheung.xime），**首次安装前要先卸载官方版**。\n'
+            printf -- '- 之后升级可以直接覆盖安装：签名固定，Rime 数据不会丢。\n'
+            printf -- '- 只打包 arm64-v8a（现在的手机基本都是），体积更小。\n'
+            printf '\n### 来源与校验\n'
+            printf -- '- 上游项目：https://github.com/ximeiorg/Xime\n'
+            printf -- '- 上游版本：%s（versionCode %s）\n' "$UP_VER" "${UP_VC:-?}"
+            printf -- '- 上游源码引用：%s（构建轨道 %s）\n' "$UP_REF" "$UP_MODE"
+            printf -- '- 触发构建的上游正式版：%s\n' "$UP_REL"
+            printf -- '- 上游 commit：%s\n' "$UP"
+            printf -- '- 构建类型：%s\n' "$KIND"
+            printf -- '- 签名：%s\n' "$SIGN"
+            printf -- '- sha256：%s\n' "$SHA256"
+            printf -- '- 大小：%s 字节\n' "$SIZE"
+            printf -- '- 本版资产：%s\n' "$OUT"
+            printf -- '- 永久下载链接（始终指向最新一版，文件名固定）：\n'
+            printf '  https://github.com/%s/releases/download/%s/%s\n' "$GITHUB_REPOSITORY" "$ALIAS_TAG" "$ALIAS"
+            printf -- '- 历史版本：本仓库 Releases 里每一版都独立保留，不会被覆盖：\n'
+            printf '  https://github.com/%s/releases\n' "$GITHUB_REPOSITORY"
+          } > "$NOTESFILE"
+
+          # ① 版本化 Release（正式、--latest）：每个版本一个独立标签，旧版本原样保留。
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes "$NOTES" --prerelease=false --latest
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$NOTESFILE" --prerelease=false --latest
           else
-            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TITLE" --notes "$NOTES" --latest
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TITLE" --notes-file "$NOTESFILE" --latest
           fi
-          # gh release edit 只改 notes、**不改标题**（标题只在 create 时设）→ 显式 PATCH 一次，
-          # 否则历史 release 的标题会一直停留在旧版本号上。
           REL_ID=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json databaseId --jq .databaseId)
           gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$REL_ID" -f name="$TITLE" >/dev/null
-          echo "标题已更新为: $TITLE"
-          # 两个名字一起上传：版本号版便于识别，别名版保证既有的永久下载链接继续可用
-          gh release upload "$TAG" "$OUT" "$ALIAS" --repo "$GITHUB_REPOSITORY" --clobber
-          echo "已发布: https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$OUT"
-          echo "稳定别名: https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$ALIAS"
+          gh release upload "$TAG" "$OUT" --repo "$GITHUB_REPOSITORY" --clobber
+          echo "已发布（版本化）: https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$OUT"
+
+          # ② 滚动别名 Release（prerelease，不参与 latest 计算）：只负责那个「文件名固定」的永久链接。
+          #    标成 prerelease，这样仓库右侧 Releases 栏 / releases/latest 指向的是上面那个正式版本化 release。
+          if gh release view "$ALIAS_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$ALIAS_TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$NOTESFILE" --prerelease=true
+          else
+            gh release create "$ALIAS_TAG" --repo "$GITHUB_REPOSITORY" --title "Xime 贴底补丁版 · 最新（永久链接）" --notes-file "$NOTESFILE" --prerelease
+          fi
+          gh release upload "$ALIAS_TAG" "$ALIAS" --repo "$GITHUB_REPOSITORY" --clobber
+          echo "已更新永久链接: https://github.com/$GITHUB_REPOSITORY/releases/download/$ALIAS_TAG/$ALIAS"
           {
-            echo "url=https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$ALIAS"
+            echo "url=https://github.com/$GITHUB_REPOSITORY/releases/download/$ALIAS_TAG/$ALIAS"
             echo "url_v=https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$OUT"
             echo "sha=$SHORT"
             echo "sha256=$SHA256"
