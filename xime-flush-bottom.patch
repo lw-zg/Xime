@@ -1,6 +1,6 @@
 --- a/app/src/main/java/com/kingzcheung/xime/service/XimeInputMethodService.kt
 +++ b/app/src/main/java/com/kingzcheung/xime/service/XimeInputMethodService.kt
-@@ -1472,11 +1472,17 @@
+@@ -1499,11 +1499,17 @@
                  // 标准（三键）导航栏 inset 明显大于手势条，额外多减一点，
                  // 让标准模式高度更接近抬高模式，但保留可辨识的差异。
                  val extraShrinkDp = if (rawDp >= 120) 8 else 0
@@ -23,7 +23,7 @@
                  val navBarDp = activeBottomDp.dp
                  val hasNavBar = navBarDp > 0.dp
                  // 左右边衬区：手机上键盘内容（候选栏 logo/收起按钮与按键区）避让挖孔/横屏导航栏；
-@@ -1844,9 +1850,10 @@
+@@ -1871,9 +1877,10 @@
                  val density = resources.displayMetrics.density
                  val rawDp = if (bottomInsetPxState.value > 0)
                      (bottomInsetPxState.value / density).toInt() else 0
@@ -43,10 +43,10 @@
  import androidx.compose.runtime.rememberUpdatedState
  import androidx.compose.runtime.setValue
 +import androidx.compose.runtime.staticCompositionLocalOf
+ import com.kingzcheung.xime.correction.KeyTapLogger
  import com.kingzcheung.xime.settings.SettingsPreferences
  import com.kingzcheung.xime.ui.isTablet
- import com.kingzcheung.xime.settings.DisplayMode
-@@ -199,11 +200,18 @@
+@@ -204,11 +205,18 @@
  
      val swipeBubble = rememberSwipeBubbleController()
      var keyboardBounds by remember { mutableStateOf(Rect(0f, 0f, 0f, 0f)) }
@@ -65,7 +65,7 @@
          val newState = if (state.isSwipeDown && state.swipeText != null) {
              state.copy(charInfos = SubcharHelper.parseSwipeDownText(state.swipeText))
          } else {
-@@ -257,12 +265,77 @@
+@@ -262,7 +270,71 @@
                  else -> (kbKey.spacingFor("qwerty").second?.dp ?: 4.25.dp)
              },
          ),
@@ -80,8 +80,8 @@
 +        val cursorActivationPx = 60.dp.toPx()
 +        // 与按键自身触发上/下滑的阈值保持一致（KeyButton.kt 的 swipeUpThreshold = -15.dp）：
 +        // 纵向位移一旦达到它，本次手势的意图就是「上滑出符号」，此时一律不改判。
-+        // 这是不依赖按键上报的第二道保险——手指从 n 滑向右上角的 i 时，dy 早已越过 15dp，
-+        // 改判不会再把 i 敲出来（用户实测：上滑「？」时问号和 i 一起出来）。
++        // 这是不依赖按键上报的第二道保险 —— 手指从 n 滑向右上角的 i 时，dy 早已越过 15dp，
++        // 改判不会再把 i 敲出来。
 +        val swipeIntentPx = 15.dp.toPx()
 +        awaitEachGesture {
 +            slideRegistry.suppressClick = false
@@ -137,13 +137,15 @@
      Box(
          modifier = modifier
              .onGloballyPositioned { coordinates ->
-                 keyboardBounds = coordinates.boundsInRoot()
+@@ -270,6 +342,7 @@
+                 // 按键坐标日志需要键盘矩形做跨设备归一化
+                 KeyTapLogger.keyboardBounds = keyboardBounds
              }
 +            .then(slideSelectModifier)
              .drawWithContent {
                  drawContent()
                  bubbleData?.let { drawSwipeBubble(it) }
-@@ -286,7 +359,9 @@
+@@ -293,7 +366,9 @@
                          .fillMaxWidth()
                          .fillMaxHeight()
                          // 平板键盘两侧留边（Gboard 式不满宽），手机维持贴边紧凑
@@ -154,7 +156,7 @@
              ) {
  
                  Column(
-@@ -369,10 +444,22 @@
+@@ -376,10 +451,22 @@
                                      .fillMaxWidth((9f / firstRowSize).coerceIn(0f, 1f))
                                      .align(Alignment.CenterHorizontally)
                              } else Modifier
@@ -178,7 +180,7 @@
                              )
                          }
                      }
-@@ -563,6 +650,13 @@
+@@ -627,6 +714,13 @@
  /** 平板键面圆角下限：键圆角与阴影圆角在平板上共同对齐此值，两处解析（主键盘/分体）共享。 */
  internal val TABLET_KEY_CORNER_RADIUS = 14.dp
  
@@ -192,7 +194,7 @@
  /** 平板键面提示（数字上标、退格的「清空」等）的额外放大倍率；主键盘与面板共用同一档。 */
  internal const val TABLET_HINT_EXTRA_SCALE = 1.35f
  
-@@ -592,6 +686,38 @@
+@@ -656,6 +750,38 @@
      kbKey.spacingOverrides[keyboard]?.cornerRadius?.dp
          ?: if (isTablet) maxOf(kbKey.cornerRadius.dp, TABLET_KEY_CORNER_RADIUS) else kbKey.cornerRadius.dp
  
@@ -213,7 +215,7 @@
 + * ⚠ 这两个标记必须放在**这个 remember 出来的对象**上，不能放在 composable 的普通局部
 + * `var` 里：`Modifier.pointerInput(Unit)` 的块不会重启（key 恒为 Unit），它捕获的是
 + * **首次重组**那一帧的局部变量引用，而重组后 `processSwipeState` 写的是新的一帧的引用，
-+ * 一读一写落在不同对象上 ⇒ 标记永远读到 false，保护形同虚设（这是「上滑同时出邻键字母」的根因）。
++ * 一读一写落在不同对象上 ⇒ 标记永远读到 false，保护形同虚设。
 + */
 +internal class SlideKeyRegistry {
 +    private val boxes = HashMap<String, Rect>()
@@ -231,7 +233,7 @@
  /** 主题调色板：主键盘正常路径、分体路径与面板渲染共用同一解析，防止多处取值漂移。 */
  internal data class KeyboardPalette(
      val keyboardBackgroundColor: Color,
-@@ -616,12 +742,16 @@
+@@ -680,12 +806,16 @@
      val specialKeyTextColor = KeyboardThemes.getSpecialKeyTextColorForBackground(
          specialKeyBackgroundColor, keyTextColor
      )
@@ -251,7 +253,7 @@
          bubbleBgColor = if (isDarkTheme) themeScheme.specialKeyDark else themeScheme.specialKeyLight,
      )
  }
-@@ -1495,6 +1625,7 @@
+@@ -1671,6 +1801,7 @@
      /** 手机横屏紧凑档：改用 [SwipeableKeyButtonLandscape]（主字符与上滑提示垂直堆叠、手势阈值收紧）。 */
      compactButton: Boolean = false,
  ) {
@@ -259,55 +261,7 @@
      Row(
          modifier = modifier
              .fillMaxWidth(),
-@@ -1520,13 +1651,25 @@
-             // 长按选项
-             val longPressConfig = KeysConfigHelper.getKeyGesture(key, isAsciiMode)?.longPress
-             val longPressDisplay = longPressConfig?.display ?: DisplayMode.KEY
--            val longPressLabels = if (longPressDisplay == DisplayMode.BUBBLE) {
-+            val longPressLabelsBase = if (longPressDisplay == DisplayMode.BUBBLE) {
-                 longPressConfig?.let { KeysConfigHelper.longPressDisplayItems(it) }
-                     ?.ifEmpty { null }
-             } else null
-             val longPressGestureMap = if (longPressDisplay == DisplayMode.BUBBLE) {
-                 longPressConfig?.let { KeysConfigHelper.longPressActionMap(it) }
-             } else null
-+            // ── 本地补丁：长按气泡里并入「上滑符号」──
-+            // 键面上滑可得的符号（如 q→"1"、n→"?"）在既有长按气泡末尾追加为候选项，
-+            // 便于「长按 + 左右滑」直接选取。仅在键已有长按气泡、该键上滑未被显式禁用
-+            // （action:none）、且上滑有可提交值时追加；追加在末尾 ⇒「长按即选中首项」不变。
-+            val swipeUpSymbol = rawSwipeUpLabel?.takeIf {
-+                it.isNotEmpty() && swipeUpAction != GestureAction.NONE && swipeUpCommitValue != null
-+            }
-+            val longPressLabels = if (longPressLabelsBase != null && swipeUpSymbol != null &&
-+                swipeUpSymbol !in longPressLabelsBase
-+            ) {
-+                longPressLabelsBase + swipeUpSymbol
-+            } else longPressLabelsBase
- 
-             // 键帽显示文本
-             val rawCommitValue = KeysConfigHelper.getKeyCommitValue(key, isAsciiMode)
-@@ -1596,9 +1739,17 @@
-                     }
-                 }
-             } else null
--            val onLongPressSelect: ((String) -> Unit)? = remember(key, longPressGestureMap, onGestureAction, onCommitText, onKeyPress) { { selectedLabel: String ->
--                dispatchLongPressSelection(
--                    selectedLabel, longPressGestureMap, onKeyPress, onCommitText, onGestureAction)
-+            val onLongPressSelect: ((String) -> Unit)? = remember(
-+                key, longPressGestureMap, onGestureAction, onCommitText, onKeyPress,
-+                longPressLabelsBase, swipeUpSymbol, onSwipeUp
-+            ) { { selectedLabel: String ->
-+                // ── 本地补丁：气泡里的「上滑符号」选中时，走与真实上滑相同的提交路径 ──
-+                if (longPressLabelsBase != null && swipeUpSymbol != null && selectedLabel == swipeUpSymbol) {
-+                    onSwipeUp?.invoke(swipeUpSymbol)
-+                } else {
-+                    dispatchLongPressSelection(
-+                        selectedLabel, longPressGestureMap, onKeyPress, onCommitText, onGestureAction)
-+                }
-             } }
- 
-             if (compactButton) {
-@@ -1609,7 +1760,14 @@
+@@ -1785,7 +1916,14 @@
                      onClick = onClick,
                      backgroundColor = config.keyBackgroundColor,
                      textColor = config.keyTextColor,
@@ -323,7 +277,7 @@
                      swipeText = swipeUpText,
                      swipeDownText = swipeDownText,
                      swipeUpKeyLabel = swipeUpKeyLabel,
-@@ -1638,7 +1796,14 @@
+@@ -1814,7 +1952,14 @@
                  onClick = onClick,
                  backgroundColor = config.keyBackgroundColor,
                  textColor = config.keyTextColor,
@@ -339,7 +293,7 @@
                  swipeText = swipeUpText,
                  swipeDownText = swipeDownText,
                  swipeUpKeyLabel = swipeUpKeyLabel,
-@@ -1749,7 +1914,9 @@
+@@ -1925,7 +2070,9 @@
              .then(shadowModifier)
              .clip(keyClipShape)
              .background(
@@ -352,7 +306,7 @@
                  else backgroundColor
 --- a/app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyButton.kt
 +++ b/app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyButton.kt
-@@ -138,6 +138,8 @@
+@@ -139,6 +139,8 @@
  private val shadowColorCache = HashMap<Color, Color>()
  
  internal fun crispShadowColor(backgroundColor: Color): Color {
@@ -361,7 +315,7 @@
      return shadowColorCache.getOrPut(backgroundColor) {
          val r = backgroundColor.red
          val g = backgroundColor.green
-@@ -388,7 +390,9 @@
+@@ -391,7 +393,9 @@
              .then(shadowModifier)
              .clip(keyClipShape)
              .background(
@@ -372,7 +326,7 @@
                  else if (isHighlighted) backgroundColor.copy(alpha = 0.8f)
                  else backgroundColor
              )
-@@ -509,6 +513,9 @@
+@@ -514,6 +518,9 @@
      val currentOnRelease by rememberUpdatedState(onRelease)
      val currentOnClick by rememberUpdatedState(onClick)
      val currentOnLongPressSelect by rememberUpdatedState(onLongPressSelect)
@@ -382,7 +336,7 @@
      val currentLongPressItems by rememberUpdatedState(longPressItems)
      val currentLongPressDrawableIds by rememberUpdatedState(longPressDrawableIds)
      val scope = rememberCoroutineScope()
-@@ -575,7 +582,7 @@
+@@ -580,7 +587,7 @@
                              !hasTriggeredSwipeUp && !hasTriggeredSwipeDown &&
                              !hasTriggeredSwipeLeft && !hasTriggeredSwipeRight &&
                              abs(dragOffsetX) < horizontalClickCancelThreshold
@@ -391,26 +345,31 @@
                              currentOnClick()
                          }
                          isPressed = false
-@@ -681,7 +688,8 @@
+@@ -687,7 +694,8 @@
                              }
                          },
                          onTap = {
--                            if (!dragActivated && !hasTriggeredSwipeUp && !hasTriggeredSwipeDown) currentOnClick()
+-                            if (!dragActivated && !hasTriggeredSwipeUp && !hasTriggeredSwipeDown) {
 +                            if (!dragActivated && !hasTriggeredSwipeUp && !hasTriggeredSwipeDown
-+                                && slideRegistry?.suppressClick != true) currentOnClick()
-                         }
-                     )
-                     return@pointerInput
-@@ -772,7 +780,7 @@
++                                && slideRegistry?.suppressClick != true) {
+                                 KeyTapLogger.recordTap(
+                                     currentText, lastPressOffset.x, lastPressOffset.y,
+                                     buttonBounds, density.density
+@@ -785,8 +793,11 @@
                                      // 而 dragActivated 由 touch slop（更大）触发。两者之间的位移区间
                                      // （5dp~touchSlop）若被 swipeDetected 吞掉点击，且 drag 未激活无 dragEnd
                                      // 兜底，会造成快速打字漏键（吃键）。5dp 位移只用于取消长按（longPressJob）。
+-                                    KeyTapLogger.recordTap(currentText, downX, downY, buttonBounds, density.density)
 -                                    currentOnClick()
-+                                    if (slideRegistry?.suppressClick != true) currentOnClick()
++                                    // 抑制时一并跳过记日志：该次按压的输出已由改判键承担，记一笔不存在的击键会污染纠错数据。
++                                    if (slideRegistry?.suppressClick != true) {
++                                        KeyTapLogger.recordTap(currentText, downX, downY, buttonBounds, density.density)
++                                        currentOnClick()
++                                    }
                                  }
                              }
                          }
-@@ -791,7 +799,9 @@
+@@ -805,7 +816,9 @@
              .then(shadowModifier)
              .clip(keyClipShape)
              .background(
@@ -421,7 +380,7 @@
                  else if (isHighlighted) backgroundColor.copy(alpha = 0.8f)
                  else backgroundColor
              )
-@@ -1153,7 +1163,9 @@
+@@ -1167,7 +1180,9 @@
              .then(shadowModifier)
              .clip(keyClipShape)
              .background(
@@ -432,7 +391,7 @@
                  else if (isHighlighted) darkenColor(backgroundColor, 0.2f)
                  else backgroundColor
              )
-@@ -1490,7 +1502,9 @@
+@@ -1602,7 +1617,9 @@
              .then(shadowModifier)
              .clip(keyClipShape)
              .background(
@@ -443,7 +402,7 @@
                  else if (isHighlighted) backgroundColor.copy(alpha = 0.8f)
                  else backgroundColor
              )
-@@ -1582,6 +1596,8 @@
+@@ -1694,6 +1711,8 @@
      val currentOnSwipeLeft by rememberUpdatedState(onSwipeLeft)
      val currentOnSwipeRight by rememberUpdatedState(onSwipeRight)
      val currentOnClick by rememberUpdatedState(onClick)
@@ -452,7 +411,7 @@
      val currentOnPress by rememberUpdatedState(onPress)
      val currentOnRelease by rememberUpdatedState(onRelease)
      val currentOnLongPressSelect by rememberUpdatedState(onLongPressSelect)
-@@ -1648,7 +1664,8 @@
+@@ -1760,7 +1779,8 @@
                              currentOnSwipeStateChange?.invoke(SwipeState(), buttonBounds)
                          },
                          onTap = {
@@ -462,7 +421,7 @@
                          }
                      )
                  } else {
-@@ -1733,7 +1750,7 @@
+@@ -1845,7 +1865,7 @@
                                          // 而 dragActivated 由 touch slop（更大）触发。5dp~touchSlop 区间
                                          // 若被 swipeDetected 吞掉点击且 drag 未激活，会造成快速打字漏键。
                                          // 5dp 位移只用于取消长按（longPressJob）。
@@ -471,7 +430,7 @@
                                      }
                                  }
                              }
-@@ -1768,7 +1785,8 @@
+@@ -1880,7 +1900,8 @@
                              onDragEnd = {
                                  if (!hasTriggeredSwipeUp && !hasTriggeredSwipeDown &&
                                      !hasTriggeredSwipeLeft && !hasTriggeredSwipeRight &&
@@ -481,7 +440,7 @@
                                      onClick()
                                  }
                                  dragActivated = false
-@@ -1869,7 +1887,11 @@
+@@ -1981,7 +2002,11 @@
              .padding(LocalKeyVisualPadding.current)
              .then(shadowModifier)
              .clip(keyClipShape)
@@ -583,7 +542,7 @@
      - "https://cdn.jsdelivr.net/gh/ximeiorg/xime-index@master/"
      - "https://fastly.jsdelivr.net/gh/ximeiorg/xime-index@master/"
      - "https://index.ximei.me/"
-@@ -103,6 +107,18 @@
+@@ -117,6 +121,18 @@
        type: solid
        color: 0xE3E4E8
        color_dark: 0x1A1A1A
@@ -602,7 +561,7 @@
    
    rose_pink:
      name: "浪漫玫瑰"
-@@ -491,9 +507,9 @@
+@@ -512,9 +528,9 @@
        z: { tap: "z", swipe_up: { label: "＊", value: "*" }, swipe_down: { label: "", action: "none", display: "key", bubble: false }, long_press: { display: "bubble", values: [ "z","Z"] } }
        x: { tap: "x", swipe_up: { label: "＠", value: "@" }, swipe_down: { label: "弓匕纟幺弓𠤎", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["x", "X"] } }
        c: { tap: "c", swipe_up: { label: "、", value: "、" }, swipe_down: { label: "又巴马厶龴ス", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["c", "C", "ç"] } }
@@ -614,7 +573,7 @@
        m: { tap: "m", swipe_up: { label: "＃", value: "#" }, swipe_down: { label: "山由贝冂冎几", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["m", "M"] } }
        # shift：单击切单击态、双击锁定大写；命令值走键盘按键路由（shift_single / shift_caps）
        shift: { width: 1.4, tap: { action: command, value: shift_single }, double_tap: { action: command, value: shift_caps } }
-@@ -553,9 +569,9 @@
+@@ -577,9 +593,9 @@
        z: { tap: "z", swipe_up: "*", long_press: { display: "bubble", values: ["z", "Z"] } }
        x: { tap: "x", swipe_up: "@", long_press: { display: "bubble", values: ["x", "X"] } }
        c: { tap: "c", swipe_up: "、", long_press: { display: "bubble", values: ["c", "C"] } }
@@ -626,7 +585,7 @@
        m: { tap: "m", swipe_up: "#", long_press: { display: "bubble", values: ["m", "M"] } }
        # shift：单击切单击态、双击锁定大写（命令值走键盘按键路由）
        shift: { width: 1.4, tap: { action: command, value: shift_single }, double_tap: { action: command, value: shift_caps } }
-@@ -624,9 +640,9 @@
+@@ -648,9 +664,9 @@
        z: { tap: { value: "z", bubble: false }, swipe_up: { label: "＊", value: "*" }, swipe_down: { label: "", action: "none", display: "key", bubble: false }, long_press: { display: "bubble", values: [ "z","Z"] } }
        x: { tap: { value: "x", bubble: false }, swipe_up: { label: "＠", value: "@" }, swipe_down: { label: "弓匕纟幺弓𠤎", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["x", "X"] } }
        c: { tap: { value: "c", bubble: false }, swipe_up: { label: "、", value: "、" }, swipe_down: { label: "又巴马厶龴ス", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["c", "C", "ç"] } }
@@ -638,7 +597,7 @@
        m: { tap: { value: "m", bubble: false }, swipe_up: { label: "＃", value: "#" }, swipe_down: { label: "山由贝冂冎几", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["m", "M"] } }
        # 逗号/句号独立成键（value 经 rime 引擎，中文态自动转全角）
        comma: { width: 1, tap: {  label: "，", value: ",", bubble: false } }
-@@ -679,9 +695,9 @@
+@@ -703,9 +719,9 @@
        z: { tap: { value: "z", bubble: false }, swipe_up: "*", long_press: { display: "bubble", values: ["z", "Z"] } }
        x: { tap: { value: "x", bubble: false }, swipe_up: "@", long_press: { display: "bubble", values: ["x", "X"] } }
        c: { tap: { value: "c", bubble: false }, swipe_up: "、", long_press: { display: "bubble", values: ["c", "C"] } }

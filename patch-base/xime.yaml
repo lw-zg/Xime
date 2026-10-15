@@ -25,6 +25,20 @@ style:
   # 显示模式：0=浅色, 1=深色, 2=跟随系统（默认）
   dark_mode: 2
 
+# ── 邻键误触纠错 ──
+# schemas 声明启用纠错的方案（schema_id），未声明的方案不参与纠错（按键/候选零影响）。
+# 语言侧证据（词频/词条）永远用方案自己的词典：五笔查五笔词典、拼音查拼音词典，
+# 不跨码制混用。第三方方案在 xime.custom.yaml 同路径追加即可，与内置列表取并集：
+#   correction:
+#     schemas: [wubi98, wanxiang]
+# 注意：①仅全拼/五笔这类「按键字母 = 编码」的方案可纠错；双拼（字母经拼写运算
+# 变换）、九键（数字键）会在按键-编码对齐检查处自动跳过，不会误纠。②纠错打分的
+# 词频区分度来自方案词典的 weight 列（有则用真值）；无 weight 的词典按
+# 「完整词条 / 合法前缀 / 非法码」三值判定（仍可纠错，词间区分度弱一些），
+# 任何时候都不会用其他方案的频次。
+correction:
+  schemas: [wubi86, wubi86_pinyin, pinyin_simp]
+
 # 配色方案可配置背景类型（纯色/渐变/图片），默认均为纯色。
 # 如需渐变/图片背景，在 xime.custom.yaml 的对应主题下覆盖 keyboard_background 即可：
 #
@@ -373,8 +387,15 @@ color_schemes:
 #             功能键：delete, enter, newline（固定换行，无视编辑器回车动作）, space, repeat_space（value 为次数，默认 5），
 #                     clear_all, undo_clear, toggle_ascii, toggle_symbols, toggle_shift,
 #                     voice（进入语音输入）, switch_route（value: emoji|symbol|clipboard）
-#     command 可用命令：
+#     command 可用命令（会走键盘按键路由，与"点击对应按键"等价）：
 #       clear_composition - 清空当前输入编码和候选词
+#       show_ime_picker   - 显示系统输入法选择器
+#       mode_change       - 切换符号 / 数字面板（与 ?123 同）
+#       mode_change_number         - 切到数字面板
+#       mode_change_common_symbol  - 切到常用符号面板
+#       shift_single      - 单击 Shift 语义
+#       shift_caps        - 双击 Shift 语义（锁定大写）
+#       emoji / symbol    - 打开表情 / 符号面板
 #     value:  上屏时的输出文本（不指定则用 label）
 #   - 键级可选 width：列宽比例（数字）。字母键默认等宽（1），功能键有内置默认；
 #     设置后仅改变该键宽度占比，不显示为文字。
@@ -508,7 +529,10 @@ keyboard:
       # 回车键
       enter: { width: 1.2, tap: { action: enter, bubble: false } }
       #  逗号键，label 为中文显示，value 为英文显示+提交值
-      comma: { tap: { label: "，", value: "," }, swipe_up: { label: "。", value: "." } , long_press: { display: "bubble", values: [ ",","."] }}
+      # comma: { tap: { label: "，", value: "," }, swipe_up: { label: "。", value: "." } , long_press: { display: "bubble", values: [ ",","."] }}
+      comma: { width: 0.8, tap: { label: "，", value: "," }, swipe_up: { label: "符号", action: command, value: symbol } }
+
+
       # 中/英切换键，label 为按键显示文字
       earth: { tap: { label: "@language", action: "toggle_ascii" }, long_press: { display: "bubble", values: [ { label: "选择输入法", action: "command", value: "show_ime_picker" } ] } }
     
