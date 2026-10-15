@@ -409,6 +409,8 @@ jobs:
           c12=$(grep -c -F 'color_dark: 0x000000' "$WS/$F5" || true)
           if [ "$c12" != "1" ]; then echo "::error::$N5 里纯黑底 color_dark: 0x000000 出现 $c12 次，应为 1 次（仅新主题）"; fail=1; fi
           if ! grep -q -F 'color_dark: 0x1A1A1A' "$WS/$F5"; then echo "::error::原「沉稳石墨」主题 color_dark: 0x1A1A1A 被改动（本体不该变）"; fail=1; fi
+          # 邻键纠错名单（correction.schemas）：本地补丁追加 rime_mint（薄荷混输，全拼部分适用）
+          if ! grep -q -F 'schemas: [wubi86, wubi86_pinyin, pinyin_simp, rime_mint]' "$WS/$F5"; then echo "::error::$N5 邻键纠错名单缺 rime_mint（薄荷混输）"; fail=1; fi
           # SwipeBubble.kt：按键气泡去掉（按压气泡 + 上滑/下滑提示气泡），只保留长按选择弹窗
           if ! grep -q -F 'if (!swipeState.isLongPress) return null' "$WS/$F8"; then echo "::error::按键气泡守卫丢失（非长按状态仍在画气泡）"; fail=1; fi
           if ! grep -q -F '本地补丁：去掉按键气泡' "$WS/$F8"; then echo "::error::气泡补丁标记丢失"; fail=1; fi

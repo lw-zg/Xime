@@ -590,7 +590,17 @@
      - "https://cdn.jsdelivr.net/gh/ximeiorg/xime-index@master/"
      - "https://fastly.jsdelivr.net/gh/ximeiorg/xime-index@master/"
      - "https://index.ximei.me/"
-@@ -117,6 +121,18 @@
+@@ -37,7 +41,8 @@
+ # 「完整词条 / 合法前缀 / 非法码」三值判定（仍可纠错，词间区分度弱一些），
+ # 任何时候都不会用其他方案的频次。
+ correction:
+-  schemas: [wubi86, wubi86_pinyin, pinyin_simp]
++  # 本地补丁：追加 rime_mint（薄荷混输，全拼部分适用邻键纠错）
++  schemas: [wubi86, wubi86_pinyin, pinyin_simp, rime_mint]
+ 
+ # 配色方案可配置背景类型（纯色/渐变/图片），默认均为纯色。
+ # 如需渐变/图片背景，在 xime.custom.yaml 的对应主题下覆盖 keyboard_background 即可：
+@@ -117,6 +122,18 @@
        type: solid
        color: 0xE3E4E8
        color_dark: 0x1A1A1A
@@ -609,7 +619,7 @@
    
    rose_pink:
      name: "浪漫玫瑰"
-@@ -512,9 +528,9 @@
+@@ -512,9 +529,9 @@
        z: { tap: "z", swipe_up: { label: "＊", value: "*" }, swipe_down: { label: "", action: "none", display: "key", bubble: false }, long_press: { display: "bubble", values: [ "z","Z"] } }
        x: { tap: "x", swipe_up: { label: "＠", value: "@" }, swipe_down: { label: "弓匕纟幺弓𠤎", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["x", "X"] } }
        c: { tap: "c", swipe_up: { label: "、", value: "、" }, swipe_down: { label: "又巴马厶龴ス", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["c", "C", "ç"] } }
@@ -621,7 +631,7 @@
        m: { tap: "m", swipe_up: { label: "＃", value: "#" }, swipe_down: { label: "山由贝冂冎几", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["m", "M"] } }
        # shift：单击切单击态、双击锁定大写；命令值走键盘按键路由（shift_single / shift_caps）
        shift: { width: 1.4, tap: { action: command, value: shift_single }, double_tap: { action: command, value: shift_caps } }
-@@ -577,9 +593,9 @@
+@@ -577,9 +594,9 @@
        z: { tap: "z", swipe_up: "*", long_press: { display: "bubble", values: ["z", "Z"] } }
        x: { tap: "x", swipe_up: "@", long_press: { display: "bubble", values: ["x", "X"] } }
        c: { tap: "c", swipe_up: "、", long_press: { display: "bubble", values: ["c", "C"] } }
@@ -633,7 +643,7 @@
        m: { tap: "m", swipe_up: "#", long_press: { display: "bubble", values: ["m", "M"] } }
        # shift：单击切单击态、双击锁定大写（命令值走键盘按键路由）
        shift: { width: 1.4, tap: { action: command, value: shift_single }, double_tap: { action: command, value: shift_caps } }
-@@ -648,9 +664,9 @@
+@@ -648,9 +665,9 @@
        z: { tap: { value: "z", bubble: false }, swipe_up: { label: "＊", value: "*" }, swipe_down: { label: "", action: "none", display: "key", bubble: false }, long_press: { display: "bubble", values: [ "z","Z"] } }
        x: { tap: { value: "x", bubble: false }, swipe_up: { label: "＠", value: "@" }, swipe_down: { label: "弓匕纟幺弓𠤎", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["x", "X"] } }
        c: { tap: { value: "c", bubble: false }, swipe_up: { label: "、", value: "、" }, swipe_down: { label: "又巴马厶龴ス", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["c", "C", "ç"] } }
@@ -645,7 +655,7 @@
        m: { tap: { value: "m", bubble: false }, swipe_up: { label: "＃", value: "#" }, swipe_down: { label: "山由贝冂冎几", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["m", "M"] } }
        # 逗号/句号独立成键（value 经 rime 引擎，中文态自动转全角）
        comma: { width: 1, tap: {  label: "，", value: ",", bubble: false } }
-@@ -703,9 +719,9 @@
+@@ -703,9 +720,9 @@
        z: { tap: { value: "z", bubble: false }, swipe_up: "*", long_press: { display: "bubble", values: ["z", "Z"] } }
        x: { tap: { value: "x", bubble: false }, swipe_up: "@", long_press: { display: "bubble", values: ["x", "X"] } }
        c: { tap: { value: "c", bubble: false }, swipe_up: "、", long_press: { display: "bubble", values: ["c", "C"] } }
