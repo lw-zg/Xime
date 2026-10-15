@@ -261,7 +261,55 @@
      Row(
          modifier = modifier
              .fillMaxWidth(),
-@@ -1785,7 +1916,14 @@
+@@ -1696,13 +1827,25 @@
+             // 长按选项
+             val longPressConfig = KeysConfigHelper.getKeyGesture(key, isAsciiMode)?.longPress
+             val longPressDisplay = longPressConfig?.display ?: DisplayMode.KEY
+-            val longPressLabels = if (longPressDisplay == DisplayMode.BUBBLE) {
++            val longPressLabelsBase = if (longPressDisplay == DisplayMode.BUBBLE) {
+                 longPressConfig?.let { KeysConfigHelper.longPressDisplayItems(it) }
+                     ?.ifEmpty { null }
+             } else null
+             val longPressGestureMap = if (longPressDisplay == DisplayMode.BUBBLE) {
+                 longPressConfig?.let { KeysConfigHelper.longPressActionMap(it) }
+             } else null
++            // ── 本地补丁：长按气泡里并入「上滑符号」──
++            // 键面上滑可得的符号（如 q→"1"、n→"?"）在既有长按气泡末尾追加为候选项，
++            // 便于「长按 + 左右滑」直接选取。仅在键已有长按气泡、该键上滑未被显式禁用
++            // （action:none）、且上滑有可提交值时追加；追加在末尾 ⇒「长按即选中首项」不变。
++            val swipeUpSymbol = rawSwipeUpLabel?.takeIf {
++                it.isNotEmpty() && swipeUpAction != GestureAction.NONE && swipeUpCommitValue != null
++            }
++            val longPressLabels = if (longPressLabelsBase != null && swipeUpSymbol != null &&
++                swipeUpSymbol !in longPressLabelsBase
++            ) {
++                longPressLabelsBase + swipeUpSymbol
++            } else longPressLabelsBase
+ 
+             // 键帽显示文本
+             val rawCommitValue = KeysConfigHelper.getKeyCommitValue(key, isAsciiMode)
+@@ -1772,9 +1915,17 @@
+                     }
+                 }
+             } else null
+-            val onLongPressSelect: ((String) -> Unit)? = remember(key, longPressGestureMap, onGestureAction, onCommitText, onKeyPress) { { selectedLabel: String ->
+-                dispatchLongPressSelection(
+-                    selectedLabel, longPressGestureMap, onKeyPress, onCommitText, onGestureAction)
++            val onLongPressSelect: ((String) -> Unit)? = remember(
++                key, longPressGestureMap, onGestureAction, onCommitText, onKeyPress,
++                longPressLabelsBase, swipeUpSymbol, onSwipeUp
++            ) { { selectedLabel: String ->
++                // ── 本地补丁：气泡里的「上滑符号」选中时，走与真实上滑相同的提交路径 ──
++                if (longPressLabelsBase != null && swipeUpSymbol != null && selectedLabel == swipeUpSymbol) {
++                    onSwipeUp?.invoke(swipeUpSymbol)
++                } else {
++                    dispatchLongPressSelection(
++                        selectedLabel, longPressGestureMap, onKeyPress, onCommitText, onGestureAction)
++                }
+             } }
+ 
+             if (compactButton) {
+@@ -1785,7 +1936,14 @@
                      onClick = onClick,
                      backgroundColor = config.keyBackgroundColor,
                      textColor = config.keyTextColor,
@@ -277,7 +325,7 @@
                      swipeText = swipeUpText,
                      swipeDownText = swipeDownText,
                      swipeUpKeyLabel = swipeUpKeyLabel,
-@@ -1814,7 +1952,14 @@
+@@ -1814,7 +1972,14 @@
                  onClick = onClick,
                  backgroundColor = config.keyBackgroundColor,
                  textColor = config.keyTextColor,
@@ -293,7 +341,7 @@
                  swipeText = swipeUpText,
                  swipeDownText = swipeDownText,
                  swipeUpKeyLabel = swipeUpKeyLabel,
-@@ -1925,7 +2070,9 @@
+@@ -1925,7 +2090,9 @@
              .then(shadowModifier)
              .clip(keyClipShape)
              .background(
