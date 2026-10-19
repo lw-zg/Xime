@@ -4,7 +4,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -39,11 +38,13 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -344,14 +345,15 @@ fun KeyButton(
                 }
                 .pointerInput(currentOnLongClick != null) {
                     if (currentOnLongClick == null) {
-                        detectTapGestures(
+                        // 容差点击：不因指针漂出键格（isOutOfBounds）而取消，见 detectTolerantTapGestures
+                        detectTolerantTapGestures(
                             onPress = {
                                 isPressed = true
                                 onPress?.invoke()
-                                val released = tryAwaitRelease()
+                            },
+                            onPressEnd = { released ->
                                 // 位移/消费导致的取消：保留按压效果，由 onDragEnd/onDragCancel 统一清理，
                                 // 避免快速打字时按压反馈提前消失（无气泡感）。
-                                // outOfBounds 取消但拖动未激活时立即清理，防止状态泄漏。
                                 if (released || !dragActivated) {
                                     isPressed = false
                                     currentOnRelease?.invoke()
@@ -362,12 +364,13 @@ fun KeyButton(
                             }
                         )
                     } else {
-                        detectTapGestures(
+                        detectTolerantTapGestures(
                             onPress = {
                                 isPressed = true
                                 longPressActivated = false
                                 onPress?.invoke()
-                                val released = tryAwaitRelease()
+                            },
+                            onPressEnd = { released ->
                                 if (released || !dragActivated) {
                                     isPressed = false
                                     currentOnRelease?.invoke()
@@ -498,6 +501,10 @@ fun SwipeableKeyButton(
     var isSwipeDown by remember { mutableStateOf(false) }
     var buttonBounds by remember { mutableStateOf(Rect(0f, 0f, 0f, 0f)) }
     var dragActivated by remember { mutableStateOf(false) }
+    // 本次手势的横向净位移峰值（父层光标手势同口径），达到阈值即判为横向滑动
+    var gesturePeakDx by remember { mutableStateOf(0f) }
+    // 本次手势是否已产出点击（点击分支与拖拽兜底共用出口，先到者生效）
+    var clickEmitted by remember { mutableStateOf(false) }
     // 按键坐标日志：记录本次按下的局部坐标（相邻键纠错数据采集，关闭时零开销）
     var lastPressOffset by remember { mutableStateOf(Offset.Zero) }
     
@@ -534,8 +541,21 @@ fun SwipeableKeyButton(
     // 横向接管阈值：低于父层光标手势激活阈值（60dp），使配置了左右滑的键优先接管横向滑动
     val horizontalSwipeSuppressThreshold = with(density) { 30.dp.toPx() }
     val suppressCursorMove = LocalSuppressCursorMove.current
-    // 父层光标手势已接管横向滑动时，本键不再判定点击（否则会"移动光标 + 打出一个字母"）
-    val cursorGestureActive = LocalCursorGestureActive.current
+
+    /**
+     * 本次手势的唯一点击出口：点击分支与拖拽兜底共用，先到者生效。
+     * 只有被判成滑动（含 `action: none`）或横向光标手势时才不点击。
+     */
+    fun emitClick(atX: Float, atY: Float) {
+        if (clickEmitted) return
+        // 被判成滑动（含 action: none）或横向光标手势时本就不该上屏
+        val swiped = hasTriggeredSwipeUp || hasTriggeredSwipeDown ||
+            hasTriggeredSwipeLeft || hasTriggeredSwipeRight
+        if (swiped || gesturePeakDx >= horizontalClickCancelThreshold) return
+        clickEmitted = true
+        KeyTapLogger.recordTap(currentText, atX, atY, buttonBounds, density.density)
+        currentOnClick()
+    }
 
     val shadowModifier = remember(shadowEnabled, shadowElevation, shadowShapeRadius, density, backgroundColor) {
         if (shadowEnabled) {
@@ -568,6 +588,8 @@ fun SwipeableKeyButton(
                         isPressed = true
                         dragOffsetX = 0f
                         dragOffsetY = 0f
+                        gesturePeakDx = 0f
+                        clickEmitted = false
                         hasTriggeredSwipeUp = false
                         hasTriggeredSwipeDown = false
                         hasTriggeredSwipeLeft = false
@@ -576,13 +598,8 @@ fun SwipeableKeyButton(
                         isSwipeDown = false
                     },
                     onDragEnd = {
-                        val shouldClick = !cursorGestureActive.value &&
-                            !hasTriggeredSwipeUp && !hasTriggeredSwipeDown &&
-                            !hasTriggeredSwipeLeft && !hasTriggeredSwipeRight &&
-                            abs(dragOffsetX) < horizontalClickCancelThreshold
-                        if (shouldClick) {
-                            currentOnClick()
-                        }
+                        // 兜底点击（点击分支也会调用同一出口，重复调用无副作用）
+                        emitClick(lastPressOffset.x, lastPressOffset.y)
                         isPressed = false
                         currentOnRelease?.invoke()
                         dragOffsetX = 0f
@@ -597,6 +614,7 @@ fun SwipeableKeyButton(
                         currentOnSwipeStateChange?.invoke(SwipeState(false, null, false, emptyList(), false, null), buttonBounds)
                     },
                     onDragCancel = {
+                        // 拖拽被取消：抬手时由点击分支兜底点击，这里不点（避免重复）
                         isPressed = false
                         currentOnRelease?.invoke()
                         dragOffsetX = 0f
@@ -613,6 +631,12 @@ fun SwipeableKeyButton(
                     onDrag = { change, dragAmount ->
                         dragOffsetX += dragAmount.x
                         dragOffsetY += dragAmount.y
+                        // 横向净位移峰值（横向分量占优时），与父层光标手势同口径
+                        val peakDx = change.position.x - lastPressOffset.x
+                        val peakDy = change.position.y - lastPressOffset.y
+                        if (abs(peakDx) > abs(peakDy) * 4f) {
+                            gesturePeakDx = maxOf(gesturePeakDx, abs(peakDx))
+                        }
 
                         // 配置了左/右滑的键：横向滑动即接管，抑制父层光标手势
                         val onSwipeLeftAction = currentOnSwipeLeft
@@ -673,28 +697,27 @@ fun SwipeableKeyButton(
             }
             .pointerInput(text, currentLongPressItems.isNullOrEmpty()) {
                 if (currentLongPressItems.isNullOrEmpty()) {
-                    detectTapGestures(
+                    // 容差点击：不因指针漂出键格（isOutOfBounds）而取消，见 detectTolerantTapGestures
+                    detectTolerantTapGestures(
                         onPress = { offset ->
                             lastPressOffset = offset
                             isPressed = true
+                            // 新手势：重置出口与横向峰值
+                            clickEmitted = false
+                            gesturePeakDx = 0f
                             currentOnSwipeStateChange?.invoke(SwipeState(isPressed = true, pressedText = currentPressText), buttonBounds)
                             currentOnPress?.invoke()
-                            val released = tryAwaitRelease()
+                        },
+                        onPressEnd = { released ->
                             if (released || !dragActivated) {
                                 isPressed = false
                                 currentOnRelease?.invoke()
                                 currentOnSwipeStateChange?.invoke(SwipeState(false, null, false, emptyList(), false, null), buttonBounds)
                             }
+                            // 手势被取消也按点击兜底（滑动由 emitClick 否决）
+                            if (!released) emitClick(lastPressOffset.x, lastPressOffset.y)
                         },
-                        onTap = {
-                            if (!dragActivated && !hasTriggeredSwipeUp && !hasTriggeredSwipeDown) {
-                                KeyTapLogger.recordTap(
-                                    currentText, lastPressOffset.x, lastPressOffset.y,
-                                    buttonBounds, density.density
-                                )
-                                currentOnClick()
-                            }
-                        }
+                        onTap = { emitClick(lastPressOffset.x, lastPressOffset.y) }
                     )
                     return@pointerInput
                 }
@@ -702,6 +725,10 @@ fun SwipeableKeyButton(
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     isPressed = true
+                    // 新手势：重置出口与横向峰值
+                    clickEmitted = false
+                    gesturePeakDx = 0f
+                    lastPressOffset = down.position
                     var localLongPressTriggered = false
                     var selectedIdx = 0
                     val downX = down.position.x
@@ -730,22 +757,27 @@ fun SwipeableKeyButton(
                     
                     val cancelThresholdPx = with(density) { 5.dp.toPx() }
                     val downY = down.position.y
-                    var swipeDetected = false
+                    var completed = false
                     
                     try {
                         var lastReportedIdx = -1
-                        var completed = false
                         while (!completed) {
                             val event = awaitPointerEvent()
                             val change = event.changes.firstOrNull() ?: break
-                            
-                            if (change.isConsumed) continue
+                            // 抬手只认本指针（也覆盖 ACTION_CANCEL），别的手指抬起不算
+                            val isUp = change.changedToUpIgnoreConsumed()
+                            val dxFromDown = change.position.x - downX
+                            val dyFromDown = change.position.y - downY
+                            if (kotlin.math.abs(dxFromDown) > kotlin.math.abs(dyFromDown) * 4f) {
+                                gesturePeakDx = maxOf(gesturePeakDx, kotlin.math.abs(dxFromDown))
+                            }
+                            if (!isUp && change.isConsumed) continue
                             
                             if (!localLongPressTriggered) {
                                 val deltaX = change.position.x - downX
                                 val deltaY = change.position.y - downY
+                                // 5dp 只用于取消长按，不参与点击判定
                                 if (kotlin.math.abs(deltaX) > cancelThresholdPx || kotlin.math.abs(deltaY) > cancelThresholdPx) {
-                                    swipeDetected = true
                                     longPressJob.cancel()
                                 }
                             }
@@ -772,21 +804,18 @@ fun SwipeableKeyButton(
                                 change.consume()
                             }
                             
-                            if (event.type == androidx.compose.ui.input.pointer.PointerEventType.Release) {
+                            if (isUp) {
                                 completed = true
                                 if (localLongPressTriggered) {
                                     val selected = items.getOrNull(selectedIdx)
                                     if (selected != null) {
+                                        // 长按已产出选择：本次手势不再补点击
+                                        clickEmitted = true
                                         KeyTapLogger.recordTap(selected, downX, downY, buttonBounds, density.density)
                                         currentOnLongPressSelect?.invoke(selected)
                                     }
-                                } else if (!dragActivated) {
-                                    // 注意：不能再用 swipeDetected 抑制点击——swipeDetected 由 5dp 位移触发，
-                                    // 而 dragActivated 由 touch slop（更大）触发。两者之间的位移区间
-                                    // （5dp~touchSlop）若被 swipeDetected 吞掉点击，且 drag 未激活无 dragEnd
-                                    // 兜底，会造成快速打字漏键（吃键）。5dp 位移只用于取消长按（longPressJob）。
-                                    KeyTapLogger.recordTap(currentText, downX, downY, buttonBounds, density.density)
-                                    currentOnClick()
+                                } else {
+                                    emitClick(downX, downY)
                                 }
                             }
                         }
@@ -795,6 +824,8 @@ fun SwipeableKeyButton(
                         isPressed = false
                         currentOnRelease?.invoke()
                         currentOnSwipeStateChange?.invoke(SwipeState(), buttonBounds)
+                        // 没等到抬手就结束（协程被重挂/事件缺失）时兜底点击
+                        if (!completed) emitClick(lastPressOffset.x, lastPressOffset.y)
                     }
                 }
             }
@@ -1150,11 +1181,12 @@ fun IconKeyButton(
             .fillMaxHeight()
             .fillMaxWidth()
             .pointerInput(Unit) {
-                detectTapGestures(
+                detectTolerantTapGestures(
                     onPress = {
                         isPressed = true
                         onPress?.invoke()
-                        tryAwaitRelease()
+                    },
+                    onPressEnd = {
                         isPressed = false
                         onRelease?.invoke()
                     },
@@ -1252,6 +1284,10 @@ fun SwipeableIconKeyButton(
     var hasTriggeredLongPress by remember { mutableStateOf(false) }
     var buttonBounds by remember { mutableStateOf(Rect(0f, 0f, 0f, 0f)) }
     var dragActivated by remember { mutableStateOf(false) }
+    // 本次手势的横向净位移峰值（父层光标手势同口径）
+    var gesturePeakDx by remember { mutableStateOf(0f) }
+    // 本次手势按下点（局部坐标）
+    var lastPressOffset by remember { mutableStateOf(Offset.Zero) }
     val currentOnClick by rememberUpdatedState(onClick)
     val currentOnRelease by rememberUpdatedState(onRelease)
     val currentOnSwipeLeft by rememberUpdatedState(onSwipeLeft)
@@ -1271,8 +1307,6 @@ fun SwipeableIconKeyButton(
     // 横向接管阈值：低于父层光标手势激活阈值（60dp），使配置了左右滑的键优先接管横向滑动
     val horizontalSwipeSuppressThreshold = with(density) { 30.dp.toPx() }
     val suppressCursorMove = LocalSuppressCursorMove.current
-    // 父层光标手势已接管横向滑动时，本键不再判定点击（否则会"移动光标 + 打出一个字母"）
-    val cursorGestureActive = LocalCursorGestureActive.current
     val bubbleShowThresholdUp = swipeUpThreshold
     val bubbleShowThresholdDown = swipeDownThreshold
     
@@ -1331,11 +1365,16 @@ fun SwipeableIconKeyButton(
             .fillMaxHeight()
             .fillMaxWidth()
             .pointerInput(Unit) {
-                detectTapGestures(
-                    onPress = {
+                // 容差点击：不因指针漂出键格（isOutOfBounds）而取消，见 detectTolerantTapGestures
+                detectTolerantTapGestures(
+                    onPress = { offset ->
                         isPressed = true
+                        // 新手势：重置横向峰值
+                        lastPressOffset = offset
+                        gesturePeakDx = 0f
                         onPress?.invoke()
-                        val released = tryAwaitRelease()
+                    },
+                    onPressEnd = { released ->
                         if (released || !dragActivated) {
                             isPressed = false
                             currentOnRelease?.invoke()
@@ -1391,7 +1430,8 @@ fun SwipeableIconKeyButton(
                             hasTriggeredSwipe = true
                             onSwipe()
                         } else if (
-                            !cursorGestureActive.value && !hasTriggeredLongPress &&
+                            gesturePeakDx < horizontalClickCancelThreshold &&
+                            !hasTriggeredLongPress &&
                             !hasTriggeredSwipeLeft && !hasTriggeredSwipeRight
                         ) {
                             currentOnClick()
@@ -1417,6 +1457,16 @@ fun SwipeableIconKeyButton(
                         onSwipeStateChange?.invoke(SwipeState(), buttonBounds)
                     },
                     onDragCancel = {
+                        // 拖拽被取消且没被判成滑动/长按：兜底点击，避免静默丢键
+                        if (gesturePeakDx < horizontalClickCancelThreshold &&
+                            !hasTriggeredLongPress &&
+                            !hasTriggeredSwipe && !hasTriggeredSwipeDown &&
+                            !hasTriggeredSwipeLeft && !hasTriggeredSwipeRight &&
+                            !hasReachedClearThreshold && !hasReachedUndoThreshold &&
+                            !isSwipingUp
+                        ) {
+                            currentOnClick()
+                        }
                         dragActivated = false
                         isPressed = false
                         currentOnRelease?.invoke()
@@ -1439,6 +1489,12 @@ fun SwipeableIconKeyButton(
                     onDrag = { change, dragAmount ->
                         dragOffsetY += dragAmount.y
                         dragOffsetX += dragAmount.x
+                        // 横向净位移峰值（横向分量占优时），与父层光标手势同口径
+                        val peakDx = change.position.x - lastPressOffset.x
+                        val peakDy = change.position.y - lastPressOffset.y
+                        if (abs(peakDx) > abs(peakDy) * 4f) {
+                            gesturePeakDx = maxOf(gesturePeakDx, abs(peakDx))
+                        }
 
                         // 配置了左/右滑的键：横向滑动即接管，抑制父层光标手势
                         val onSwipeLeftAction = currentOnSwipeLeft
@@ -1551,8 +1607,8 @@ fun SwipeableIconKeyButton(
                         while (!completed) {
                             val event = awaitPointerEvent()
                             val change = event.changes.firstOrNull() ?: break
-                            val isRelease =
-                                event.type == androidx.compose.ui.input.pointer.PointerEventType.Release
+                            // 抬手只认本指针（覆盖 ACTION_POINTER_UP 与 ACTION_CANCEL）
+                            val isRelease = change.changedToUpIgnoreConsumed()
 
                             if (!localLongPressTriggered) {
                                 val deltaX = change.position.x - downX
@@ -1749,12 +1805,14 @@ fun SwipeableKeyButtonLandscape(
             .fillMaxWidth()
             .pointerInput(currentText, currentLongPressItems.isNullOrEmpty(), currentOnLongPressSelect != null) {
                 if (currentLongPressItems.isNullOrEmpty() || currentOnLongPressSelect == null) {
-                    detectTapGestures(
+                    // 容差点击：不因指针漂出键格（isOutOfBounds）而取消，见 detectTolerantTapGestures
+                    detectTolerantTapGestures(
                         onPress = {
                             isPressed = true
                             currentOnSwipeStateChange?.invoke(SwipeState(isPressed = true, pressedText = currentPressText), buttonBounds)
                             currentOnPress?.invoke()
-                            tryAwaitRelease()
+                        },
+                        onPressEnd = {
                             isPressed = false
                             currentOnRelease?.invoke()
                             currentOnSwipeStateChange?.invoke(SwipeState(), buttonBounds)
@@ -1833,7 +1891,7 @@ fun SwipeableKeyButtonLandscape(
                                     change.consume()
                                 }
 
-                                if (event.type == androidx.compose.ui.input.pointer.PointerEventType.Release) {
+                                if (change.changedToUpIgnoreConsumed()) {
                                     completed = true
                                     if (localLongPressTriggered) {
                                         val selected = items.getOrNull(selectedIdx)
