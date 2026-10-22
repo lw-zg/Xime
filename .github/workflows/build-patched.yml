@@ -364,6 +364,7 @@ jobs:
           if ! grep -q -F 'longPressLabelsBase' "$WS/$F2"; then echo "::error::长按气泡未与上滑符号合并（longPressLabelsBase 未出现）"; fail=1; fi
           if ! grep -q -F 'swipeUpSymbol' "$WS/$F2"; then echo "::error::长按气泡未带上滑符号（swipeUpSymbol 未出现）"; fail=1; fi
           if ! grep -q -F 'onSwipeUp?.invoke(swipeUpSymbol)' "$WS/$F2"; then echo "::error::气泡里选中上滑符号后未走真实上滑提交路径"; fail=1; fi
+          if ! grep -q -F 'isLetterKey' "$WS/$F2"; then echo "::error::长按气泡未启用本键专属符号（isLetterKey 未出现）"; fail=1; fi
           # KeyButton.kt：透明底色分支应出现 6 次（crispShadowColor 1 处 + 5 个键面站点）
           c3=$(grep -c -F 'backgroundColor.alpha < 0.05f' "$WS/$F3" || true)
           if [ "$c3" != "6" ]; then echo "::error::$N3 里『透明底色分支』出现 $c3 次，应为 6 次"; fail=1; fi
