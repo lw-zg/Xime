@@ -1,0 +1,340 @@
+# Xime 输入方案子索引
+# ⚠️ 此文件由 scripts/ci-update.py 自动生成，请勿手动编辑
+index_version: 1
+updated_at: '2026-10-21'
+schemas:
+- id: builtin
+  name: 默认方案
+  author: 王永民
+  description: 五笔字形 86 版，经典五笔输入方案,包括了拼音相关功能。
+  type: built-in
+  tags:
+  - 五笔
+  - 拼音
+  homepage: https://github.com/kingzcheung/rime-wubi
+  appVersion: '>=2.6.0'
+  currentVersion: 2.1.2
+  versions:
+  - version: 2.1.2
+    date: '2026-08-01'
+    changelog: 'feat(t9): 拼音九键方案适配 librime-t9 插件'
+    downloadUrl:
+    - url: https://github.com/kingzcheung/rime-wubi/archive/refs/tags/2.1.2.tar.gz
+      size: 2.4 MB
+      sizeBytes: 2506623
+      sha256: 2a95f95e95a906b7fb2a20af752953dd3df73003775303d2e2fc7c641c56bec3
+  - version: 2.0.1
+    date: '2026-06-01'
+    changelog: ''
+    downloadUrl:
+    - url: https://github.com/kingzcheung/rime-wubi/archive/refs/tags/2.0.1.tar.gz
+      sha256: 2124a5168435293ae8cc9008d5322b844698e0fcb4e290397eb700d41ffd7469
+      size: 2.1 MB
+      sizeBytes: 2181001
+  - version: 2.0.0
+    date: '2026-05-14'
+    changelog: ''
+    downloadUrl:
+    - url: https://github.com/kingzcheung/rime-wubi/archive/refs/tags/2.0.0.tar.gz
+      sha256: 92c292339536434920aefe3728fa4666b347337e26e0aa47f0dab0d1cd5c5cc7
+      size: 2.1 MB
+      sizeBytes: 2165924
+- id: cangjie
+  name: 倉頡輸入法
+  author: rime
+  description: 倉頡五代，支持擴展區漢字、「快趣」詞組編碼
+  type: remote
+  tags:
+  - 倉頡
+  homepage: https://github.com/rime/rime-cangjie
+  dependencies:
+  - luna_pinyin
+  - symbols
+  - essay
+  appVersion: '>=2.3.0'
+  currentVersion: master
+  versions:
+  - version: master
+    date: '2026-06-04'
+    changelog: ''
+    downloadUrl:
+    - url: https://github.com/rime/rime-cangjie/archive/refs/heads/master.zip
+      sha256: ''
+      size: ''
+- id: luna_pinyin
+  name: 朙月拼音
+  author: rime
+  description: 朙月拼音方案
+  type: remote
+  tags:
+  - 拼音
+  - 反查
+  homepage: https://github.com/rime/rime-luna-pinyin
+  license: GPL-3.0
+  dependencies: []
+  appVersion: '>=2.3.0'
+  currentVersion: master
+  versions:
+  - version: master
+    date: '2026-06-06'
+    changelog: ''
+    downloadUrl:
+    - url: https://github.com/rime/rime-luna-pinyin/archive/refs/heads/master.zip
+      sha256: ''
+      size: ''
+- id: quick
+  name: 速成輸入法
+  author: rime
+  description: 速成取倉頡碼的首尾二碼,本方案支持詞句連書、自動調整詞頻、記憶新詞
+  type: remote
+  tags:
+  - 速成
+  homepage: https://github.com/rime/rime-quick
+  dependencies:
+  - luna_pinyin
+  - cangjie
+  - essay
+  appVersion: '>=2.3.0'
+  currentVersion: master
+  versions:
+  - version: master
+    date: '2026-06-04'
+    changelog: ''
+    downloadUrl:
+    - url: https://github.com/rime/rime-quick/archive/refs/heads/master.zip
+      sha256: ''
+      size: ''
+- id: rime-cantonese
+  name: 粵語拼音方案
+  author: CanCLID
+  description: 粵語拼音方案，採用香港語言學學會粵拼（Jyutping），支援聲調輸入、IPA 顯示、Emoji 及普通話／筆畫／倉頡反查。
+  type: remote
+  tags:
+  - 粵語
+  - 拼音
+  - 反查
+  homepage: https://github.com/rime/rime-cantonese
+  license: CC-BY-4.0
+  dependencies:
+  - luna_pinyin
+  - stroke
+  - cangjie
+  appVersion: '>=3.2.3'
+  currentVersion: latest
+  versions:
+  - version: latest
+    date: '2024-12-15'
+    changelog: ''
+    downloadUrl:
+    - url: https://github.com/rime/rime-cantonese/archive/refs/tags/latest.zip
+      sha256: 47461c203a85e448e39b4ddb632b65720e7c255c2fbd52753b288e6a801c02c3
+      size: 4.6 MB
+      sizeBytes: 4817001
+- id: rime-frost
+  name: 白霜拼音
+  author: gaboolic
+  description: 白霜拼音：蒹葭苍苍，白露为霜。白霜拼音使用高质量语料，进行分词，重新统计字频、词频，归一化，打造纯净、词频准确、智能的词库。
+  type: remote
+  tags:
+  - 拼音
+  - 双拼
+  homepage: https://github.com/gaboolic/rime-frost
+  appVersion: '>=2.3.0'
+  currentVersion: 1.0.4
+  versions:
+  - version: 1.0.4
+    date: '2026-07-10'
+    changelog: ''
+    downloadUrl:
+    - url: https://github.com/gaboolic/rime-frost/releases/download/1.0.4/rime-frost-schemas.zip
+      sha256: 4f4998ae83f63d757c0a4ace192f69d48265bddfabe231642b73e3739ed0f2f5
+      size: 42 MB
+- id: rime-ice
+  name: 雾凇拼音
+  author: iDvel
+  description: 雾凇拼音是一份开箱即用的简体中文 Rime 输入法配置，词库长期维护，基本功能齐全，使用完全离线，质量稳定可靠。
+  type: remote
+  tags:
+  - 拼音
+  - 双拼
+  homepage: https://github.com/iDvel/rime-ice
+  appVersion: '>=2.3.0'
+  currentVersion: 2026.06.30
+  versions:
+  - version: 2026.06.30
+    date: '2026-06-30'
+    changelog: '🐞 修正了此前一个版本的打包产物 full.zip 中，含有无关文件的问题 🐞 修正了部分文件非 utf8 编码的问题 🐞 修正了
+      vhelp 提示不正确的问题 ⚠️ 为避免和简拼冲突，四个字母以下的单词不再能通过全小写输入其大写版本，请按原样大小写输入。e.g. hk --✗-->
+      HK；HK --✓--> HK 📚 中文、英文词库更新 🆕 添加了 full_compiled.zip 作为可下载项目（librime 1.17.0 编译），此产物经过预编译，可大幅度减少初次部署时间 '
+    downloadUrl:
+    - url: https://github.com/iDvel/rime-ice/releases/download/2026.06.30/full_compiled.zip
+      sha256: ae810e0023f28d3eb45ff98a7c58830dd0b505c2272638a321fa6d5a6f5d5418
+      size: 45.2 MB
+  - version: 2026.06.03
+    date: '2026-06-04'
+    changelog: 增改词汇
+    downloadUrl:
+    - url: https://github.com/iDvel/rime-ice/releases/download/2026.06.03/full.zip
+      sha256: ccbc2017b0131f41281a9e86ae0706d71faba85a73b9c05390e17c0b5fed3145
+      size: 17 MB
+- id: rime-wanxiang
+  name: 万象拼音标准版
+  author: amzxyz
+  description: 万象拼音——基于深度优化的词库和语法模型
+  type: remote
+  tags:
+  - 拼音
+  - 双拼
+  homepage: https://github.com/amzxyz/rime-wanxiang
+  appVersion: '>=2.4.0'
+  currentVersion: v18.1.4
+  versions:
+  - version: v18.1.4
+    date: '2026-10-17'
+    changelog: '- 特征词汇迁移到模型缩减词库尺寸,模型进一步净化缩减到380M '
+    downloadUrl:
+    - url: https://github.com/amzxyz/rime-wanxiang/releases/download/v18.1.4/rime-wanxiang-base.zip
+      sha256: d12f648327b0eb16c7cfca4ffd010885fc850773fcf7eb81090e2414b6ac9a3e
+      size: 24.4 MB
+    - url: https://github.com/amzxyz/RIME-LMDG/releases/download/LTS/wanxiang-lts-zh-hans.gram
+      sha256: ''
+      size: 380 MB
+      sizeBytes: 123026414
+- id: stroke
+  name: 笔画
+  author: rime
+  description: 适配笔画输入法布局,基本能够满足日常使用。
+  type: remote
+  tags:
+  - 笔画
+  homepage: https://github.com/ximeiorg/rime-stroke
+  dependencies:
+  - luna_pinyin
+  appVersion: '>=2.5.0'
+  currentVersion: 0.2.0
+  versions:
+  - version: 0.2.0
+    date: '2026-10-05'
+    changelog: 优化了词库的格式以及词条，并支持输入部分笔画连打
+    downloadUrl:
+    - url: https://github.com/ximeiorg/rime-stroke/releases/download/0.2.0/rime-stroke-0.2.0.zip
+      sha256: 914c3b8ba1e765f1fe9fe869b424006d9c83e4fa4f9b55a9fdc94623b4f23943
+      size: 2.84 MB
+      sizeBytes: 2840000
+- id: wubi98
+  name: 五笔98
+  author: rime
+  description: 五笔字形 98 版，支持繁体字
+  type: remote
+  tags:
+  - 五笔
+  - 形码
+  - 繁体
+  homepage: https://github.com/cz-archive/rime-wubi98
+  license: GPL-3.0
+  appVersion: '>=2.3.0'
+  currentVersion: 1.0.0
+  versions:
+  - version: 1.0.0
+    date: '2026-06-04'
+    changelog: ''
+    downloadUrl:
+    - url: https://github.com/cz-archive/rime-wubi98/archive/refs/tags/1.0.0.tar.gz
+      sha256: 7d105524b81373c7fef0cbfd197fa3c236bcb4264b1935c5e384bacb10fece53
+      size: 902.9 KB
+      sizeBytes: 924526
+- id: wubixsj
+  name: 新世纪五笔
+  author: 空山明月（Xime 适配：aizigao）
+  description: 新世纪五笔，包含纯五笔与五笔拼音混输方案，支持拼音反查与候选字根注释。
+  type: remote
+  tags:
+  - 五笔
+  - 形码
+  - 拼音
+  homepage: https://github.com/aizigao/Xime_wubi_xinshiji
+  appVersion: '>=2.8.0'
+  currentVersion: 2.3.1
+  versions:
+  - version: 2.3.1
+    date: '2026-09-05'
+    changelog: 新增下滑全选、复制、粘贴操作, 展示字根到候选字（需要2.8.0）。
+    downloadUrl:
+    - url: https://github.com/aizigao/Xime_wubi_xinshiji/releases/download/v2.3.1/wubixsj-2.3.1.zip
+      sha256: c25422bcebae575b699f60bc18959503227e74b84a1c6f9c61a9b3d54f9dc5d1
+      size: 1.9 MB
+      sizeBytes: 1959721
+  - version: 2.2.0
+    date: '2026-09-03'
+    changelog: 初始发布 Xime 兼容的新世纪五笔方案，包含纯五笔、五笔拼音混输与自定义配置。
+    downloadUrl:
+    - url: https://github.com/aizigao/Xime_wubi_xinshiji/releases/download/v2.2.0/wubixsj-2.2.0.zip
+      sha256: 865ddbb9c0c7f7d7a9ace688aedd2a8844e37b8eb63529b5edef5625a7f470d2
+      size: 1.8 MB
+      sizeBytes: 1922913
+- id: xqzm
+  name: 风入松郑码方案
+  author: 风入松
+  description: 该方案包括三个方案：小泉郑码、小泉简郑、小泉拼音。
+  type: remote
+  tags:
+  - 郑码
+  - 拼音
+  - 简繁
+  homepage: https://github.com/hzqim/xqzm
+  dependencies: []
+  appVersion: '>=2.6.0'
+  currentVersion: zm-6.4.2
+  versions:
+  - version: zm-6.4.2
+    date: '2026-07-29'
+    changelog: ''
+    downloadUrl:
+    - url: https://github.com/hzqim/xqzm/archive/refs/tags/zm-6.4.2.tar.gz
+      sha256: 5cea73cf5625fd03234e8af97d7224afc8397d8b52ec01e2d1ac377be4fc2b00
+      size: 7.6 MB
+      sizeBytes: 7988200
+- id: zhengma
+  name: 郑码方案
+  author: chen32768
+  description: 郑码方案，支持郑码、郑码拼音、郑码打简出繁
+  type: remote
+  tags:
+  - 郑码
+  - 拼音
+  - 简繁
+  homepage: https://github.com/chen32768/zhengma_for_rime
+  dependencies: []
+  appVersion: '>=2.3.0'
+  currentVersion: master
+  versions:
+  - version: master
+    date: '2026-06-08'
+    changelog: ''
+    downloadUrl:
+    - url: https://github.com/chen32768/zhengma_for_rime/archive/refs/heads/master.zip
+      sha256: ''
+      size: 899KB
+# ── 以下条目由 lw-zg/Xime 的 build-ohmyrime.yml 追加（勿手动编辑上游部分）──
+- id: oh-my-rime
+  name: 薄荷拼音（oh-my-rime）
+  author: Mintimate
+  description: oh-my-rime 是由 Mintimate 维护的 Rime 配置模板：薄荷拼音为主方案，另含小鹤/自然码等双拼、五笔 86/98、地球拼音、笔画、九宫格，自带 Lua 功能（计算器、农历、时间、金额大写、Unicode 等）。
+  type: remote
+  tags:
+  - 拼音
+  - 双拼
+  - 五笔
+  - 九宫格
+  homepage: https://github.com/Mintimate/oh-my-rime
+  appVersion: '>=3.0.0'
+  currentVersion: 2026.10.19
+  versions:
+  - version: 2026.10.19
+    date: '2026-10-24'
+    changelog: 跟随上游 5fca6ae067fd666b5ec4f119c5147efd629cc76d
+    downloadUrl:
+    - url: https://github.com/lw-zg/Xime/releases/download/oh-my-rime-scheme/oh-my-rime-2026.10.19.zip
+      sha256: 0627c4f13c8e3a03a28b8ba3c7d62a8868c38af61cd4f2f701af782e47bf2544
+      size: 22.7MB
+      sizeBytes: 23772785
