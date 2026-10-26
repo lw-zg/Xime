@@ -344,11 +344,19 @@ jobs:
 
           echo "── 3) 校验补丁效果确实生效 ──"
           fail=0
-          # F1 已退役：上游 v3.4.0 自带 keyboardFlushBottom 贴底开关，沿用「读用户设置」的写法，开关归用户。
+          # F1 主体沿用上游 v3.4.0 自带 keyboardFlushBottom 贴底开关（读用户设置），开关归用户。
           # ⚠ 曾写死 keyboardFlushBottom = true 导致设置开关失效（2026-10-26 用户实测），写死必须反证拦截。
+          # 新增：系统深浅色切换（darkMode=SYSTEM）时用 onConfigurationChanged 入参 newConfig 实时算出夜间态，
+          # 写入 systemNightState（被 isDarkTheme 读取、不会被 R8 删），写入即触发键盘重组并取到最新系统主题。
+          # ⚠ 早期用「未使用的局部读取 systemNightTick」订阅，被 R8 整段死代码删除，修复完全没进产物——务必校验新机制。
           if grep -q -F 'if (rawDp > 38)' "$WS/$F1"; then echo "::error::F1 不应再残留旧的 'if (rawDp > 38)' 强制贴底逻辑"; fail=1; fi
           if grep -q -F 'keyboardFlushBottom = true' "$WS/$F1"; then echo "::error::F1 不得写死 keyboardFlushBottom = true（写死会让设置页开关失效）"; fail=1; fi
           if ! grep -q -F 'keyboardFlushBottom = SettingsPreferences.isKeyboardFlushBottom(this)' "$WS/$F1"; then echo "::error::F1 未沿用上游「读用户设置」的贴底开关（三方合并可能漏掉上游改动）"; fail=1; fi
+          if grep -q -F 'systemNightTick' "$WS/$F1"; then echo "::error::F1 仍残留旧的 systemNightTick（未使用会被 R8 删，必须改用 systemNightState）"; fail=1; fi
+          if ! grep -q -F 'systemNightState' "$WS/$F1"; then echo "::error::F1 缺少 systemNightState（系统深浅色跟随修复未生效）"; fail=1; fi
+          if ! grep -q -F 'uiState.value.darkMode == DARK_MODE_SYSTEM' "$WS/$F1"; then echo "::error::F1 未限定「跟随系统」时才触发键盘重组"; fail=1; fi
+          if ! grep -q -F 'systemNightState.value = (newNightMode == android.content.res.Configuration.UI_MODE_NIGHT_YES)' "$WS/$F1"; then echo "::error::F1 系统主题切换未用 newConfig 实时写入 systemNightState 触发重组"; fail=1; fi
+          if ! grep -q -F 'DARK_MODE_SYSTEM -> systemNightState.value' "$WS/$F1"; then echo "::error::F1 isDarkTheme() 的 SYSTEM 分支未直接读 systemNightState（resources.configuration 会滞后）"; fail=1; fi
           # F11：keyboard_flush_bottom 默认 false→true（贴底默认开，用户可在设置里关掉）
           c13=$(grep -c -F 'getBoolean(KEY_KEYBOARD_FLUSH_BOTTOM, true)' "$WS/$F11" || true)
           if [ "$c13" != "1" ]; then echo "::error::F11 贴底默认值应为开启（getBoolean(KEY_KEYBOARD_FLUSH_BOTTOM, true) 出现 $c13 次，应为 1 次）"; fail=1; fi

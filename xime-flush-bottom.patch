@@ -1,3 +1,57 @@
+--- a/app/src/main/java/com/kingzcheung/xime/service/XimeInputMethodService.kt
++++ b/app/src/main/java/com/kingzcheung/xime/service/XimeInputMethodService.kt
+@@ -284,6 +284,13 @@
+     internal val mainHandler = Handler(Looper.getMainLooper())
+     
+     internal val uiState = mutableStateOf(InputUIState())
++    // 系统深浅色切换：InputMethodService 的 resources.configuration 在 uiMode 变化后往往尚未刷新，
++    // 故在 onConfigurationChanged 用「入参 newConfig」实时算出系统夜间态写入 systemNightState；
++    // 该 State 在 isDarkTheme()(SYSTEM 分支) 组合时被读取，写入即触发键盘重组并取到最新值。
++    // ⚠ 不能用「未使用的局部读取」去订阅（R8 会把整段死代码删掉），也不能靠 uiState.copy()——
++    // mutableStateOf 默认结构相等，字段未变时 copy 不触发重组。窗口兜底背景由 applyWindowBackground 单独处理。
++    private val systemNightState = mutableStateOf(false)
++    private var lastNightMode = -1
+     /** 悬浮键盘拖到底部"松手切换非悬浮"的提示态：拖动回调边沿写入（进入时震动一次），
+      *  松手在 onFloatingKeyboardDragEnd 消费；底部光效（FloatingExitGlow）按它显隐 */
+     internal val floatingExitHintState = mutableStateOf(false)
+@@ -659,11 +666,7 @@
+     fun isDarkTheme(): Boolean {
+         return when (uiState.value.darkMode) {
+             DARK_MODE_DARK -> true
+-            DARK_MODE_SYSTEM -> {
+-                val nightModeFlags = resources.configuration.uiMode and
+-                        android.content.res.Configuration.UI_MODE_NIGHT_MASK
+-                nightModeFlags == android.content.res.Configuration.UI_MODE_NIGHT_YES
+-            }
++            DARK_MODE_SYSTEM -> systemNightState.value
+             else -> false
+         }
+     }
+@@ -680,6 +683,10 @@
+         window.window?.decorView?.setViewTreeSavedStateRegistryOwner(this)
+         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
+         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
++        // 初始化系统夜间态：用当前 resources.configuration（服务创建时即为最新）定初值，
++        // 之后由 onConfigurationChanged 用 newConfig 实时更新。
++        lastNightMode = resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK
++        systemNightState.value = (lastNightMode == android.content.res.Configuration.UI_MODE_NIGHT_YES)
+         
+         
+         FileLogger.init(this)
+@@ -2581,6 +2588,13 @@
+         hasHardwareKeyboard = SettingsPreferences.isHardwareKeyboardDetectionEnabled(this) &&
+             newConfig.keyboard != android.content.res.Configuration.KEYBOARD_NOKEYS
+         super.onConfigurationChanged(newConfig)
++        // 系统深浅色切换：仅当「跟随系统」时，用入参 newConfig 实时算出夜间态写入 systemNightState，
++        // 触发键盘重组并让 isDarkTheme()(SYSTEM 分支) 取到最新系统主题。
++        val newNightMode = newConfig.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK
++        if (lastNightMode != -1 && newNightMode != lastNightMode && uiState.value.darkMode == DARK_MODE_SYSTEM) {
++            systemNightState.value = (newNightMode == android.content.res.Configuration.UI_MODE_NIGHT_YES)
++        }
++        lastNightMode = newNightMode
+         if (newConfig.screenWidthDp > newConfig.screenHeightDp) {
+             closeToolPanel()
+         }
 --- a/app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyboardLayout.kt
 +++ b/app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyboardLayout.kt
 @@ -52,6 +52,7 @@
