@@ -454,7 +454,9 @@ jobs:
           if ! grep -q -F 'current.route == OverlayRoute.Symbol' "$WS/$F10"; then echo "::error::F10 符号浮层返回未特判 OverlayRoute.Symbol"; fail=1; fi
           if ! grep -q -F 'KeyboardPage.Main(MainType.FULL)' "$WS/$F10"; then echo "::error::F10 符号浮层返回未落到打字页 Main(FULL)"; fail=1; fi
           if ! grep -q -F '本地补丁：符号浮层' "$WS/$F10"; then echo "::error::F10 补丁标记缺失"; fail=1; fi
-          if ! grep -q -F 'else current.behind' "$WS/$F10"; then echo "::error::F10 非符号覆盖页（如其它浮层）未保留回背后页逻辑（行为回归）"; fail=1; fi
+          if ! grep -q -F '_page.value = current.behind' "$WS/$F10"; then echo "::error::F10 非符号覆盖页（如其它浮层）未保留回背后页逻辑（行为回归）"; fail=1; fi
+          # 仅改 page 不够：面板态下 _keyboardState 停在 Number，_syncViewState 会把 Main(FULL) 解析回面板视图
+          if ! grep -q -F '_keyboardState.value = saved ?: KeyboardLayoutState.Chinese' "$WS/$F10"; then echo "::error::F10 未还原键盘布局状态（返回会停在数字面板视图）"; fail=1; fi
           if [ "$fail" != "0" ]; then exit 1; fi
           echo "  ✓ F1 已退役（贴底开关归用户，F11 仅改默认值为开启）+ 键区内边距归零 + 底排外侧圆角 + 滑键改判（误触修复） + 无键帽全局开关（键面无底色无边框，旧「无键帽」主题已下架并迁移）+ 主题设置页开关 + 内置方案市场镜像索引 + ？↔％ 互换 + 新增「石墨纯黑」主题 + 去掉按键气泡 + 符号浮层返回键挪左下角 + F10 符号浮层返回回到打字页（而非数字页），全部到位"
           echo "── 相对上游的最终改动 ──"

@@ -819,13 +819,23 @@
              }
 --- a/app/src/main/java/com/kingzcheung/xime/viewmodel/KeyboardViewModel.kt
 +++ b/app/src/main/java/com/kingzcheung/xime/viewmodel/KeyboardViewModel.kt
-@@ -599,7 +599,8 @@
+@@ -599,7 +599,18 @@
      fun closeOverlay() {
          val current = _page.value
          if (current is KeyboardPage.Overlay) {
 -            _page.value = current.behind
-+            // 本地补丁：符号浮层（可能从数字面板等二级页打开）返回一律回到打字页，而非背后的数字页
-+            _page.value = if (current.route == OverlayRoute.Symbol) KeyboardPage.Main(MainType.FULL) else current.behind
++            // 本地补丁：符号浮层（可能从数字面板等二级页打开）返回一律回到打字页，而非背后的数字页。
++            // 仅改 page 不够：从面板进浮层时 _keyboardState 还停在 Number/CommonSymbol，
++            // _syncViewState 会把 Main(FULL) 重新解析回面板视图（表现为"返回还是数字页"），
++            // 必须像 exitPanel 一样连同键盘布局状态一起还原。
++            if (current.route == OverlayRoute.Symbol) {
++                _page.value = KeyboardPage.Main(MainType.FULL)
++                val saved = _savedKbStateBeforePanel
++                _savedKbStateBeforePanel = null
++                _keyboardState.value = saved ?: KeyboardLayoutState.Chinese
++            } else {
++                _page.value = current.behind
++            }
              _syncViewState()
          }
      }
