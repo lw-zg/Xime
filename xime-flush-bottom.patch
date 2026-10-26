@@ -1,52 +1,37 @@
 --- a/app/src/main/java/com/kingzcheung/xime/service/XimeInputMethodService.kt
 +++ b/app/src/main/java/com/kingzcheung/xime/service/XimeInputMethodService.kt
-@@ -1508,11 +1508,17 @@
-                 // 标准（三键）导航栏 inset 明显大于手势条，额外多减一点，
-                 // 让标准模式高度更接近抬高模式，但保留可辨识的差异。
-                 val extraShrinkDp = if (rawDp >= 120) 8 else 0
--                val bottomSpaceDp = if (rawDp > 0) (rawDp - bottomInsetShrinkDp - extraShrinkDp).coerceAtLeast(0) else 0
--                // 兜底仅用于彻底检测不到任何底部 inset 的场景（全屏沉浸），
--                // 不再把已有差异（标准 44dp / 手势 16dp）强行垫平。
--                val minBottomDp = 18
--                val activeBottomDp = if (bottomSpaceDp == 0) minBottomDp else bottomSpaceDp
-+                // ── 本地补丁：手势导航下键盘贴底 ──
-+                // extractBottomInset 在手势导航上报 16dp（竖屏）/ 32dp（横屏），
-+                // 三键导航上报 44dp 以上。手势条是半透明悬浮元素，键盘最后一排可以压在
-+                // 它下面（Gboard / 语燕的观感），所以小 inset（≤ 38dp）一律不留白；
-+                // 三键导航是实体栏，仍按原逻辑避让，避免按键被系统栏压住。
-+                val bottomSpaceDp = if (rawDp > 38) {
-+                    (rawDp - bottomInsetShrinkDp - extraShrinkDp).coerceAtLeast(0)
-+                } else 0
-+                // 原实现用 minBottomDp = 18 兜底：检测不到 inset 时反而垫出 18dp，
-+                // 比手势条本身还高 —— 这正是"键盘不贴底"的来源之一。补丁移除该兜底。
-+                val activeBottomDp = bottomSpaceDp
-                 val navBarDp = activeBottomDp.dp
-                 val hasNavBar = navBarDp > 0.dp
-                 // 左右边衬区：手机上键盘内容（候选栏 logo/收起按钮与按键区）避让挖孔/横屏导航栏；
-@@ -1880,9 +1886,10 @@
-                 val density = resources.displayMetrics.density
-                 val rawDp = if (bottomInsetPxState.value > 0)
+@@ -568,7 +568,9 @@
+             isSttEnabled = SettingsPreferences.isSttEnabled(this@XimeInputMethodService),
+             keyboardHeightDp = SettingsPreferences.getKeyboardHeightDp(this, isLandscape),
+             keyboardBottomPaddingDp = SettingsPreferences.getKeyboardBottomPaddingDp(this),
+-            keyboardFlushBottom = SettingsPreferences.isKeyboardFlushBottom(this),
++            // 本地补丁：强制键盘贴底（上游 v3.4.0 新增的 keyboardFlushBottom 开关默认 false，
++            // 但本补丁的目的就是贴底，故强制为 true；用户仍可在「设置」里关掉贴底）。
++            keyboardFlushBottom = true,
+             keyboardMarginStartDp = SettingsPreferences.getKeyboardMarginStartDp(this).coerceIn(0, maxMargin),
+             keyboardMarginEndDp = SettingsPreferences.getKeyboardMarginEndDp(this).coerceIn(0, maxMargin),
+             // 调节进行中的预览值同样收紧（旋转/折叠切换后可能超出新屏宽上限）
+@@ -1971,7 +1973,8 @@
                      (bottomInsetPxState.value / density).toInt() else 0
-+                // 本地补丁：与上方 SideEffect 保持一致 —— 手势导航（小 inset）不留白，键区贴底。
                  val extraShrink = if (rawDp >= 120) 8 else 0
--                val bottomSpace = if (rawDp > 0) (rawDp - 8 - extraShrink).coerceAtLeast(0) else 0
--                val activeBottomDp = if (bottomSpace == 0) 18 else bottomSpace
-+                val bottomSpace = if (rawDp > 38) (rawDp - 8 - extraShrink).coerceAtLeast(0) else 0
-+                val activeBottomDp = bottomSpace
-                 view.updateLayoutParams<android.widget.FrameLayout.LayoutParams> {
-                     height = ((displayHeight + state.keyboardBottomPaddingDp + activeBottomDp) * density).toInt()
-                 }
+                 val bottomSpace = if (rawDp > 0) (rawDp - 8 - extraShrink).coerceAtLeast(0) else 0
+-                val activeBottomDp = if (SettingsPreferences.isKeyboardFlushBottom(this)) 0
++                // 本地补丁：与上方 state.keyboardFlushBottom 保持一致，强制贴底（上游开关默认 false）。
++                val activeBottomDp = if (state.keyboardFlushBottom) 0
+                     else if (bottomSpace == 0) 18 else bottomSpace
+                 // 独立 IME 面板：承载区比屏高小得多，首帧高度同样要装得下
+                 val fittedHeight = KeyboardHostFit.fitContentHeightDp(
 --- a/app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyboardLayout.kt
 +++ b/app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyboardLayout.kt
-@@ -50,6 +50,7 @@
+@@ -52,6 +52,7 @@
  import androidx.compose.runtime.rememberCoroutineScope
  import androidx.compose.runtime.rememberUpdatedState
  import androidx.compose.runtime.setValue
 +import androidx.compose.runtime.staticCompositionLocalOf
  import com.kingzcheung.xime.correction.KeyTapLogger
+ import com.kingzcheung.xime.R
  import com.kingzcheung.xime.settings.SettingsPreferences
- import com.kingzcheung.xime.ui.isTablet
-@@ -208,11 +209,18 @@
+@@ -212,11 +213,18 @@
  
      val swipeBubble = rememberSwipeBubbleController()
      var keyboardBounds by remember { mutableStateOf(Rect(0f, 0f, 0f, 0f)) }
@@ -65,7 +50,7 @@
          val newState = if (state.isSwipeDown && state.swipeText != null) {
              state.copy(charInfos = SubcharHelper.parseSwipeDownText(state.swipeText))
          } else {
-@@ -266,7 +274,71 @@
+@@ -270,7 +278,71 @@
                  else -> (kbKey.spacingFor("qwerty").second?.dp ?: 4.25.dp)
              },
          ),
@@ -137,7 +122,7 @@
      Box(
          modifier = modifier
              .onGloballyPositioned { coordinates ->
-@@ -274,6 +346,7 @@
+@@ -278,6 +350,7 @@
                  // 按键坐标日志需要键盘矩形做跨设备归一化
                  KeyTapLogger.keyboardBounds = keyboardBounds
              }
@@ -145,7 +130,7 @@
              .drawWithContent {
                  drawContent()
                  bubbleData?.let { drawSwipeBubble(it) }
-@@ -297,7 +370,9 @@
+@@ -301,7 +374,9 @@
                          .fillMaxWidth()
                          .fillMaxHeight()
                          // 平板键盘两侧留边（Gboard 式不满宽），手机维持贴边紧凑
@@ -156,7 +141,7 @@
              ) {
  
                  Column(
-@@ -381,10 +456,22 @@
+@@ -385,10 +460,22 @@
                                      .fillMaxWidth(fraction)
                                      .align(Alignment.CenterHorizontally)
                              } else Modifier
@@ -180,7 +165,7 @@
                              )
                          }
                      }
-@@ -632,6 +719,13 @@
+@@ -636,6 +723,13 @@
  /** 平板键面圆角下限：键圆角与阴影圆角在平板上共同对齐此值，两处解析（主键盘/分体）共享。 */
  internal val TABLET_KEY_CORNER_RADIUS = 14.dp
  
@@ -194,7 +179,7 @@
  /** 平板键面提示（数字上标、退格的「清空」等）的额外放大倍率；主键盘与面板共用同一档。 */
  internal const val TABLET_HINT_EXTRA_SCALE = 1.35f
  
-@@ -661,6 +755,38 @@
+@@ -665,6 +759,38 @@
      kbKey.spacingOverrides[keyboard]?.cornerRadius?.dp
          ?: if (isTablet) maxOf(kbKey.cornerRadius.dp, TABLET_KEY_CORNER_RADIUS) else kbKey.cornerRadius.dp
  
@@ -233,7 +218,7 @@
  /** 主题调色板：主键盘正常路径、分体路径与面板渲染共用同一解析，防止多处取值漂移。 */
  internal data class KeyboardPalette(
      val keyboardBackgroundColor: Color,
-@@ -685,12 +811,16 @@
+@@ -689,12 +815,16 @@
      val specialKeyTextColor = KeyboardThemes.getSpecialKeyTextColorForBackground(
          specialKeyBackgroundColor, keyTextColor
      )
@@ -253,7 +238,7 @@
          bubbleBgColor = if (isDarkTheme) themeScheme.specialKeyDark else themeScheme.specialKeyLight,
      )
  }
-@@ -1693,6 +1823,7 @@
+@@ -1697,6 +1827,7 @@
      /** 手机横屏紧凑档：改用 [SwipeableKeyButtonLandscape]（主字符与上滑提示垂直堆叠、手势阈值收紧）。 */
      compactButton: Boolean = false,
  ) {
@@ -261,7 +246,7 @@
      Row(
          modifier = modifier
              .fillMaxWidth(),
-@@ -1718,13 +1849,29 @@
+@@ -1722,13 +1853,29 @@
              // 长按选项
              val longPressConfig = KeysConfigHelper.getKeyGesture(key, isAsciiMode)?.longPress
              val longPressDisplay = longPressConfig?.display ?: DisplayMode.KEY
@@ -292,7 +277,7 @@
  
              // 键帽显示文本
              val rawCommitValue = KeysConfigHelper.getKeyCommitValue(key, isAsciiMode)
-@@ -1794,9 +1941,17 @@
+@@ -1798,9 +1945,17 @@
                      }
                  }
              } else null
@@ -313,7 +298,7 @@
              } }
  
              if (compactButton) {
-@@ -1807,7 +1962,14 @@
+@@ -1811,7 +1966,14 @@
                      onClick = onClick,
                      backgroundColor = config.keyBackgroundColor,
                      textColor = config.keyTextColor,
@@ -329,7 +314,7 @@
                      swipeText = swipeUpText,
                      swipeDownText = swipeDownText,
                      swipeUpKeyLabel = swipeUpKeyLabel,
-@@ -1836,7 +1998,14 @@
+@@ -1840,7 +2002,14 @@
                  onClick = onClick,
                  backgroundColor = config.keyBackgroundColor,
                  textColor = config.keyTextColor,
@@ -345,7 +330,7 @@
                  swipeText = swipeUpText,
                  swipeDownText = swipeDownText,
                  swipeUpKeyLabel = swipeUpKeyLabel,
-@@ -1947,7 +2116,9 @@
+@@ -1951,7 +2120,9 @@
              .then(shadowModifier)
              .clip(keyClipShape)
              .background(
@@ -470,7 +455,7 @@
          val contentScale = adaptiveKeyContentScale(
 --- a/app/src/main/java/com/kingzcheung/xime/ui/theme/KeyboardTheme.kt
 +++ b/app/src/main/java/com/kingzcheung/xime/ui/theme/KeyboardTheme.kt
-@@ -11,6 +11,7 @@
+@@ -13,6 +13,7 @@
  import com.kingzcheung.xime.settings.BackgroundConfig
  import com.kingzcheung.xime.settings.ColorSchemeEntry
  import com.kingzcheung.xime.settings.KeysConfigHelper
@@ -478,7 +463,7 @@
  import java.io.File
  import java.io.FileInputStream
  import java.io.InputStream
-@@ -98,6 +99,36 @@
+@@ -100,6 +101,36 @@
  )
  
  object KeyboardThemes {
@@ -515,7 +500,7 @@
      /** 从 xime.yaml 加载的配置覆盖项。 */
      private var configOverrides: Map<String, ColorSchemeEntry> = emptyMap()
  
-@@ -129,6 +160,18 @@
+@@ -131,6 +162,18 @@
  
      /** 从配置文件加载主题覆盖项。应在 Application.onCreate 中调用。 */
      fun initFromConfig(context: Context) {
@@ -534,7 +519,7 @@
          reload(context)
      }
  
-@@ -533,6 +576,9 @@
+@@ -535,6 +578,9 @@
  
      /** 返回 color_schemes 中显式定义的按键背景色，未定义返回 null。 */
      fun getKeyBgColorOverride(themeId: String, isDark: Boolean): Color? {
@@ -586,57 +571,57 @@
    
    rose_pink:
      name: "浪漫玫瑰"
-@@ -522,9 +539,9 @@
-       z: { tap: "z", swipe_up: { label: "＊", value: "*" }, swipe_down: { label: "", action: "none", display: "key", bubble: false }, long_press: { display: "bubble", values: [ "z","Z"] } }
-       x: { tap: "x", swipe_up: { label: "＠", value: "@" }, swipe_down: { label: "弓匕纟幺弓𠤎", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["x", "X"] } }
-       c: { tap: "c", swipe_up: { label: "、", value: "、" }, swipe_down: { label: "又巴马厶龴ス", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["c", "C", "ç"] } }
--      v: { tap: "v", swipe_up: { label: "？", value: "?" }, swipe_down: { label: "女刀九臼巛彐", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["v", "V"] } }
-+      v: { tap: "v", swipe_up: { label: "％", value: "%" }, swipe_down: { label: "女刀九臼巛彐", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["v", "V"] } }
-       b: { tap: "b", swipe_up: { label: "！", value: "!" }, swipe_down: { label: "子耳了也阝卩㔾凵", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["b", "B"] } }
--      n: { tap: "n", swipe_up: { label: "％", value: "%" }, swipe_down: { label: "已己巳心忄羽乙𠃜", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["n", "N", "ñ"] } }
-+      n: { tap: "n", swipe_up: { label: "？", value: "?" }, swipe_down: { label: "已己巳心忄羽乙𠃜", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["n", "N", "ñ"] } }
-       m: { tap: "m", swipe_up: { label: "＃", value: "#" }, swipe_down: { label: "山由贝冂冎几", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["m", "M"] } }
+@@ -526,9 +543,9 @@
+       z: { tap: "z", swipe_up: { label: "＊", value: "*" }, swipe_down: { label: "", action: "none", display: "key", bubble: false }, long_press: { display: "bubble", values: [{ action: commit, value: "z" }, { action: commit, value: "Z" }] } }
+       x: { tap: "x", swipe_up: { label: "＠", value: "@" }, swipe_down: { label: "弓匕纟幺弓𠤎", action: "none", display: "bubble" }, long_press: { display: "bubble", values: [{ action: commit, value: "x" }, { action: commit, value: "X" }] } }
+       c: { tap: "c", swipe_up: { label: "、", value: "、" }, swipe_down: { label: "又巴马厶龴ス", action: "none", display: "bubble" }, long_press: { display: "bubble", values: [{ action: commit, value: "c" }, { action: commit, value: "C" }, { action: commit, value: "ç" }] } }
+-      v: { tap: "v", swipe_up: { label: "？", value: "?" }, swipe_down: { label: "女刀九臼巛彐", action: "none", display: "bubble" }, long_press: { display: "bubble", values: [{ action: commit, value: "v" }, { action: commit, value: "V" }] } }
++      v: { tap: "v", swipe_up: { label: "％", value: "%" }, swipe_down: { label: "女刀九臼巛彐", action: "none", display: "bubble" }, long_press: { display: "bubble", values: [{ action: commit, value: "v" }, { action: commit, value: "V" }] } }
+       b: { tap: "b", swipe_up: { label: "！", value: "!" }, swipe_down: { label: "子耳了也阝卩㔾凵", action: "none", display: "bubble" }, long_press: { display: "bubble", values: [{ action: commit, value: "b" }, { action: commit, value: "B" }] } }
+-      n: { tap: "n", swipe_up: { label: "％", value: "%" }, swipe_down: { label: "已己巳心忄羽乙𠃜", action: "none", display: "bubble" }, long_press: { display: "bubble", values: [{ action: commit, value: "n" }, { action: commit, value: "N" }, { action: commit, value: "ñ" }] } }
++      n: { tap: "n", swipe_up: { label: "？", value: "?" }, swipe_down: { label: "已己巳心忄羽乙𠃜", action: "none", display: "bubble" }, long_press: { display: "bubble", values: [{ action: commit, value: "n" }, { action: commit, value: "N" }, { action: commit, value: "ñ" }] } }
+       m: { tap: "m", swipe_up: { label: "＃", value: "#" }, swipe_down: { label: "山由贝冂冎几", action: "none", display: "bubble" }, long_press: { display: "bubble", values: [{ action: commit, value: "m" }, { action: commit, value: "M" }] } }
        # shift：单击切单击态、双击锁定大写；命令值走键盘按键路由（shift_single / shift_caps）
        shift: { width: 1.4, tap: { action: command, value: shift_single }, double_tap: { action: command, value: shift_caps } }
-@@ -594,9 +611,9 @@
-       z: { tap: "z", swipe_up: "*", long_press: { display: "bubble", values: ["z", "Z"] } }
-       x: { tap: "x", swipe_up: "@", long_press: { display: "bubble", values: ["x", "X"] } }
-       c: { tap: "c", swipe_up: "、", long_press: { display: "bubble", values: ["c", "C"] } }
--      v: { tap: "v", swipe_up: "?", long_press: { display: "bubble", values: ["v", "V"] } }
-+      v: { tap: "v", swipe_up: "%", long_press: { display: "bubble", values: ["v", "V"] } }
-       b: { tap: "b", swipe_up: "!", long_press: { display: "bubble", values: ["b", "B"] } }
--      n: { tap: "n", swipe_up: "%", long_press: { display: "bubble", values: ["n", "N"] } }
-+      n: { tap: "n", swipe_up: "?", long_press: { display: "bubble", values: ["n", "N"] } }
-       m: { tap: "m", swipe_up: "#", long_press: { display: "bubble", values: ["m", "M"] } }
+@@ -598,9 +615,9 @@
+       z: { tap: "z", swipe_up: "*", long_press: { display: "bubble", values: [{ action: commit, value: "z" }, { action: commit, value: "Z" }] } }
+       x: { tap: "x", swipe_up: "@", long_press: { display: "bubble", values: [{ action: commit, value: "x" }, { action: commit, value: "X" }] } }
+       c: { tap: "c", swipe_up: "、", long_press: { display: "bubble", values: [{ action: commit, value: "c" }, { action: commit, value: "C" }] } }
+-      v: { tap: "v", swipe_up: "?", long_press: { display: "bubble", values: [{ action: commit, value: "v" }, { action: commit, value: "V" }] } }
++      v: { tap: "v", swipe_up: "%", long_press: { display: "bubble", values: [{ action: commit, value: "v" }, { action: commit, value: "V" }] } }
+       b: { tap: "b", swipe_up: "!", long_press: { display: "bubble", values: [{ action: commit, value: "b" }, { action: commit, value: "B" }] } }
+-      n: { tap: "n", swipe_up: "%", long_press: { display: "bubble", values: [{ action: commit, value: "n" }, { action: commit, value: "N" }] } }
++      n: { tap: "n", swipe_up: "?", long_press: { display: "bubble", values: [{ action: commit, value: "n" }, { action: commit, value: "N" }] } }
+       m: { tap: "m", swipe_up: "#", long_press: { display: "bubble", values: [{ action: commit, value: "m" }, { action: commit, value: "M" }] } }
        # shift：单击切单击态、双击锁定大写（命令值走键盘按键路由）
        shift: { width: 1.4, tap: { action: command, value: shift_single }, double_tap: { action: command, value: shift_caps } }
-@@ -665,9 +682,9 @@
-       z: { tap: { value: "z", bubble: false }, swipe_up: { label: "＊", value: "*" }, swipe_down: { label: "", action: "none", display: "key", bubble: false }, long_press: { display: "bubble", values: [ "z","Z"] } }
-       x: { tap: { value: "x", bubble: false }, swipe_up: { label: "＠", value: "@" }, swipe_down: { label: "弓匕纟幺弓𠤎", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["x", "X"] } }
-       c: { tap: { value: "c", bubble: false }, swipe_up: { label: "、", value: "、" }, swipe_down: { label: "又巴马厶龴ス", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["c", "C", "ç"] } }
--      v: { tap: { value: "v", bubble: false }, swipe_up: { label: "？", value: "?" }, swipe_down: { label: "女刀九臼巛彐", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["v", "V"] } }
-+      v: { tap: { value: "v", bubble: false }, swipe_up: { label: "％", value: "%" }, swipe_down: { label: "女刀九臼巛彐", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["v", "V"] } }
-       b: { tap: { value: "b", bubble: false }, swipe_up: { label: "！", value: "!" }, swipe_down: { label: "子耳了也阝卩㔾凵", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["b", "B"] } }
--      n: { tap: { value: "n", bubble: false }, swipe_up: { label: "％", value: "%" }, swipe_down: { label: "已己巳心忄羽乙𠃜", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["n", "N", "ñ"] } }
-+      n: { tap: { value: "n", bubble: false }, swipe_up: { label: "？", value: "?" }, swipe_down: { label: "已己巳心忄羽乙𠃜", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["n", "N", "ñ"] } }
-       m: { tap: { value: "m", bubble: false }, swipe_up: { label: "＃", value: "#" }, swipe_down: { label: "山由贝冂冎几", action: "none", display: "bubble" }, long_press: { display: "bubble", values: ["m", "M"] } }
+@@ -669,9 +686,9 @@
+       z: { tap: { value: "z", bubble: false }, swipe_up: { label: "＊", value: "*" }, swipe_down: { label: "", action: "none", display: "key", bubble: false }, long_press: { display: "bubble", values: [{ action: commit, value: "z" }, { action: commit, value: "Z" }] } }
+       x: { tap: { value: "x", bubble: false }, swipe_up: { label: "＠", value: "@" }, swipe_down: { label: "弓匕纟幺弓𠤎", action: "none", display: "bubble" }, long_press: { display: "bubble", values: [{ action: commit, value: "x" }, { action: commit, value: "X" }] } }
+       c: { tap: { value: "c", bubble: false }, swipe_up: { label: "、", value: "、" }, swipe_down: { label: "又巴马厶龴ス", action: "none", display: "bubble" }, long_press: { display: "bubble", values: [{ action: commit, value: "c" }, { action: commit, value: "C" }, { action: commit, value: "ç" }] } }
+-      v: { tap: { value: "v", bubble: false }, swipe_up: { label: "？", value: "?" }, swipe_down: { label: "女刀九臼巛彐", action: "none", display: "bubble" }, long_press: { display: "bubble", values: [{ action: commit, value: "v" }, { action: commit, value: "V" }] } }
++      v: { tap: { value: "v", bubble: false }, swipe_up: { label: "％", value: "%" }, swipe_down: { label: "女刀九臼巛彐", action: "none", display: "bubble" }, long_press: { display: "bubble", values: [{ action: commit, value: "v" }, { action: commit, value: "V" }] } }
+       b: { tap: { value: "b", bubble: false }, swipe_up: { label: "！", value: "!" }, swipe_down: { label: "子耳了也阝卩㔾凵", action: "none", display: "bubble" }, long_press: { display: "bubble", values: [{ action: commit, value: "b" }, { action: commit, value: "B" }] } }
+-      n: { tap: { value: "n", bubble: false }, swipe_up: { label: "％", value: "%" }, swipe_down: { label: "已己巳心忄羽乙𠃜", action: "none", display: "bubble" }, long_press: { display: "bubble", values: [{ action: commit, value: "n" }, { action: commit, value: "N" }, { action: commit, value: "ñ" }] } }
++      n: { tap: { value: "n", bubble: false }, swipe_up: { label: "？", value: "?" }, swipe_down: { label: "已己巳心忄羽乙𠃜", action: "none", display: "bubble" }, long_press: { display: "bubble", values: [{ action: commit, value: "n" }, { action: commit, value: "N" }, { action: commit, value: "ñ" }] } }
+       m: { tap: { value: "m", bubble: false }, swipe_up: { label: "＃", value: "#" }, swipe_down: { label: "山由贝冂冎几", action: "none", display: "bubble" }, long_press: { display: "bubble", values: [{ action: commit, value: "m" }, { action: commit, value: "M" }] } }
        # 逗号/句号独立成键（value 经 rime 引擎，中文态自动转全角）
        comma: { width: 1, tap: {  label: "，", value: ",", bubble: false } }
-@@ -720,9 +737,9 @@
-       z: { tap: { value: "z", bubble: false }, swipe_up: "*", long_press: { display: "bubble", values: ["z", "Z"] } }
-       x: { tap: { value: "x", bubble: false }, swipe_up: "@", long_press: { display: "bubble", values: ["x", "X"] } }
-       c: { tap: { value: "c", bubble: false }, swipe_up: "、", long_press: { display: "bubble", values: ["c", "C"] } }
--      v: { tap: { value: "v", bubble: false }, swipe_up: "?", long_press: { display: "bubble", values: ["v", "V"] } }
-+      v: { tap: { value: "v", bubble: false }, swipe_up: "%", long_press: { display: "bubble", values: ["v", "V"] } }
-       b: { tap: { value: "b", bubble: false }, swipe_up: "!", long_press: { display: "bubble", values: ["b", "B"] } }
--      n: { tap: { value: "n", bubble: false }, swipe_up: "%", long_press: { display: "bubble", values: ["n", "N"] } }
-+      n: { tap: { value: "n", bubble: false }, swipe_up: "?", long_press: { display: "bubble", values: ["n", "N"] } }
-       m: { tap: { value: "m", bubble: false }, swipe_up: "#", long_press: { display: "bubble", values: ["m", "M"] } }
+@@ -724,9 +741,9 @@
+       z: { tap: { value: "z", bubble: false }, swipe_up: "*", long_press: { display: "bubble", values: [{ action: commit, value: "z" }, { action: commit, value: "Z" }] } }
+       x: { tap: { value: "x", bubble: false }, swipe_up: "@", long_press: { display: "bubble", values: [{ action: commit, value: "x" }, { action: commit, value: "X" }] } }
+       c: { tap: { value: "c", bubble: false }, swipe_up: "、", long_press: { display: "bubble", values: [{ action: commit, value: "c" }, { action: commit, value: "C" }] } }
+-      v: { tap: { value: "v", bubble: false }, swipe_up: "?", long_press: { display: "bubble", values: [{ action: commit, value: "v" }, { action: commit, value: "V" }] } }
++      v: { tap: { value: "v", bubble: false }, swipe_up: "%", long_press: { display: "bubble", values: [{ action: commit, value: "v" }, { action: commit, value: "V" }] } }
+       b: { tap: { value: "b", bubble: false }, swipe_up: "!", long_press: { display: "bubble", values: [{ action: commit, value: "b" }, { action: commit, value: "B" }] } }
+-      n: { tap: { value: "n", bubble: false }, swipe_up: "%", long_press: { display: "bubble", values: [{ action: commit, value: "n" }, { action: commit, value: "N" }] } }
++      n: { tap: { value: "n", bubble: false }, swipe_up: "?", long_press: { display: "bubble", values: [{ action: commit, value: "n" }, { action: commit, value: "N" }] } }
+       m: { tap: { value: "m", bubble: false }, swipe_up: "#", long_press: { display: "bubble", values: [{ action: commit, value: "m" }, { action: commit, value: "M" }] } }
        comma: { width: 1, tap: {  label: ",", value: ",", bubble: false } }
        period: { width: 1, tap: {  label: ".", value: ".", bubble: false } }
 --- a/app/src/main/java/com/kingzcheung/xime/ui/settings/ThemeSettingsScreen.kt
 +++ b/app/src/main/java/com/kingzcheung/xime/ui/settings/ThemeSettingsScreen.kt
-@@ -16,6 +16,7 @@
+@@ -20,6 +20,7 @@
  import androidx.compose.material3.IconButton
  import androidx.compose.material3.MaterialTheme
  import androidx.compose.material3.Scaffold
@@ -644,7 +629,7 @@
  import androidx.compose.material3.Text
  import androidx.compose.material3.TopAppBar
  import androidx.compose.material3.TopAppBarDefaults
-@@ -24,7 +25,9 @@
+@@ -28,7 +29,9 @@
  import androidx.compose.runtime.mutableStateOf
  import androidx.compose.runtime.remember
  import androidx.compose.runtime.setValue
@@ -654,7 +639,7 @@
  import androidx.compose.ui.unit.dp
  import androidx.lifecycle.compose.collectAsStateWithLifecycle
  import androidx.lifecycle.viewmodel.compose.viewModel
-@@ -171,6 +174,42 @@
+@@ -175,6 +178,42 @@
              item {
                  Spacer(modifier = Modifier.height(8.dp))
                  Text(
@@ -694,7 +679,7 @@
 +            item {
 +                Spacer(modifier = Modifier.height(8.dp))
 +                Text(
-                     text = "提示: 配色切换后设置页面立即生效，键盘需重启输入法",
+                     text = tr(R.string.s_tishi_peiseqiehuanhoushezhiyem_f78e8),
                      style = MaterialTheme.typography.bodySmall,
                      color = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f),
 --- a/app/src/main/java/com/kingzcheung/xime/viewmodel/ThemeSettingsViewModel.kt
@@ -745,7 +730,7 @@
      val displayText = if (isLongPressMode) null
 --- a/app/src/main/java/com/kingzcheung/xime/ui/keyboard/SymbolKeyboardLayout.kt
 +++ b/app/src/main/java/com/kingzcheung/xime/ui/keyboard/SymbolKeyboardLayout.kt
-@@ -15,17 +15,14 @@
+@@ -21,17 +21,14 @@
  import androidx.compose.foundation.layout.fillMaxWidth
  import androidx.compose.foundation.layout.height
  import androidx.compose.foundation.layout.padding
@@ -763,7 +748,7 @@
  import androidx.compose.material3.Text
  import androidx.compose.runtime.Composable
  import androidx.compose.runtime.CompositionLocalProvider
-@@ -36,6 +33,7 @@
+@@ -42,6 +39,7 @@
  import androidx.compose.ui.Modifier
  import androidx.compose.ui.draw.clip
  import androidx.compose.ui.graphics.Color
@@ -771,8 +756,8 @@
  import androidx.compose.ui.platform.LocalContext
  import androidx.compose.ui.text.style.TextAlign
  import androidx.compose.ui.unit.dp
-@@ -82,8 +80,6 @@
-         listOf(SymbolCategory(name = "最近使用", id = "recentSymbols", symbols = recentSymbols)) +
+@@ -88,8 +86,6 @@
+         listOf(SymbolCategory(name = tr(R.string.s_zuijinshiyong), id = "recentSymbols", symbols = recentSymbols)) +
              SymbolData.categories
      }
 -    // 图标按钮容器色 = 功能键底色（与面板的返回/删除键同色，不再自造 lerp 色调）
@@ -780,7 +765,7 @@
      val scope = rememberCoroutineScope()
  
      val pagerState = rememberPagerState(
-@@ -107,33 +103,6 @@
+@@ -113,33 +109,6 @@
              .background(backgroundColor)
              .padding(outerPadding)
      ) {
@@ -804,7 +789,7 @@
 -            ) {
 -                Icon(
 -                    imageVector = Icons.Default.KeyboardArrowLeft,
--                    contentDescription = "返回",
+-                    contentDescription = tr(R.string.s_fanhui),
 -                    tint = textColor,
 -                    modifier = Modifier.size(24.dp)
 -                )
@@ -814,7 +799,7 @@
          // 内容区：符号网格 + HorizontalPager
          Box(
              modifier = Modifier
-@@ -197,7 +166,7 @@
+@@ -203,7 +172,7 @@
              }
          }
  
@@ -823,7 +808,7 @@
          Row(
              modifier = Modifier
                  .fillMaxWidth()
-@@ -205,6 +174,21 @@
+@@ -211,6 +180,21 @@
              horizontalArrangement = Arrangement.spacedBy(columnGap),
              verticalAlignment = Alignment.CenterVertically
          ) {
@@ -845,7 +830,7 @@
              Row(
                  modifier = Modifier
                      .weight(1f)
-@@ -221,7 +205,8 @@
+@@ -227,7 +211,8 @@
                          },
                          backgroundColor = backgroundColor,
                          textColor = textColor,
@@ -855,3 +840,15 @@
                      )
                  }
              }
+--- a/app/src/main/java/com/kingzcheung/xime/viewmodel/KeyboardViewModel.kt
++++ b/app/src/main/java/com/kingzcheung/xime/viewmodel/KeyboardViewModel.kt
+@@ -599,7 +599,8 @@
+     fun closeOverlay() {
+         val current = _page.value
+         if (current is KeyboardPage.Overlay) {
+-            _page.value = current.behind
++            // 本地补丁：符号浮层（可能从数字面板等二级页打开）返回一律回到打字页，而非背后的数字页
++            _page.value = if (current.route == OverlayRoute.Symbol) KeyboardPage.Main(MainType.FULL) else current.behind
+             _syncViewState()
+         }
+     }

@@ -244,7 +244,8 @@ jobs:
                    patch-base/KeyButton.kt patch-base/KeyboardTheme.kt \
                    patch-base/xime.yaml \
                    patch-base/ThemeSettingsScreen.kt patch-base/ThemeSettingsViewModel.kt \
-                   patch-base/SwipeBubble.kt patch-base/SymbolKeyboardLayout.kt; do
+                   patch-base/SwipeBubble.kt patch-base/SymbolKeyboardLayout.kt \
+                   patch-base/KeyboardViewModel.kt; do
             gh api -H "Accept: application/vnd.github.raw" "repos/$GITHUB_REPOSITORY/contents/$f?ref=main" > "$REF/$f"
           done
           echo "已取回："
@@ -252,7 +253,8 @@ jobs:
                 "$REF/patch-base/KeyboardLayout.kt" "$REF/patch-base/KeyButton.kt" \
                 "$REF/patch-base/KeyboardTheme.kt" "$REF/patch-base/xime.yaml" \
                 "$REF/patch-base/ThemeSettingsScreen.kt" "$REF/patch-base/ThemeSettingsViewModel.kt" \
-                "$REF/patch-base/SwipeBubble.kt" "$REF/patch-base/SymbolKeyboardLayout.kt"
+                "$REF/patch-base/SwipeBubble.kt" "$REF/patch-base/SymbolKeyboardLayout.kt" \
+                "$REF/patch-base/KeyboardViewModel.kt"
 
       - name: 套用补丁（三方合并，自动适配上游改动）
         run: |
@@ -270,6 +272,7 @@ jobs:
           F7="app/src/main/java/com/kingzcheung/xime/viewmodel/ThemeSettingsViewModel.kt"
           F8="app/src/main/java/com/kingzcheung/xime/ui/keyboard/SwipeBubble.kt"
           F9="app/src/main/java/com/kingzcheung/xime/ui/keyboard/SymbolKeyboardLayout.kt"
+          F10="app/src/main/java/com/kingzcheung/xime/viewmodel/KeyboardViewModel.kt"
           N1="XimeInputMethodService.kt"
           N2="KeyboardLayout.kt"
           N3="KeyButton.kt"
@@ -279,12 +282,13 @@ jobs:
           N7="ThemeSettingsViewModel.kt"
           N8="SwipeBubble.kt"
           N9="SymbolKeyboardLayout.kt"
+          N10="KeyboardViewModel.kt"
 
           echo "── 1) 把补丁作用在 base 副本上，还原出「我们改完的版本」──"
           rm -rf "$RUNNER_TEMP/base" && mkdir -p "$RUNNER_TEMP/base"
           cd "$RUNNER_TEMP/base" && git init -q .
           mkdir -p "$(dirname "$F1")" "$(dirname "$F2")" "$(dirname "$F3")" "$(dirname "$F4")" "$(dirname "$F5")" \
-                   "$(dirname "$F6")" "$(dirname "$F7")" "$(dirname "$F8")"
+                   "$(dirname "$F6")" "$(dirname "$F7")" "$(dirname "$F8")" "$(dirname "$F10")"
           cp "$BASE/$N1" "$F1"
           cp "$BASE/$N2" "$F2"
           cp "$BASE/$N3" "$F3"
@@ -294,6 +298,7 @@ jobs:
           cp "$BASE/$N7" "$F7"
           cp "$BASE/$N8" "$F8"
           cp "$BASE/$N9" "$F9"
+          cp "$BASE/$N10" "$F10"
           if ! git apply "$PATCH"; then
             echo "::error::补丁在本仓库保存的 base 文件上都套不上 —— patch-base/ 与 xime-flush-bottom.patch 不配对，请一起重新生成"
             exit 1
@@ -307,12 +312,13 @@ jobs:
           cp "$F7" "$RUNNER_TEMP/post-$N7"
           cp "$F8" "$RUNNER_TEMP/post-$N8"
           cp "$F9" "$RUNNER_TEMP/post-$N9"
-          echo "  ✓ base + 补丁 = 目标版本（各 $(wc -l < "$F1") / $(wc -l < "$F2") / $(wc -l < "$F3") / $(wc -l < "$F4") / $(wc -l < "$F5") / $(wc -l < "$F6") / $(wc -l < "$F7") / $(wc -l < "$F8") / $(wc -l < "$F9") 行）"
+          cp "$F10" "$RUNNER_TEMP/post-$N10"
+          echo "  ✓ base + 补丁 = 目标版本（各 $(wc -l < "$F1") / $(wc -l < "$F2") / $(wc -l < "$F3") / $(wc -l < "$F4") / $(wc -l < "$F5") / $(wc -l < "$F6") / $(wc -l < "$F7") / $(wc -l < "$F8") / $(wc -l < "$F9") / $(wc -l < "$F10") 行）"
 
           echo "── 2) 与上游最新代码做三方合并 ──"
           cd "$WS"
           CONFLICT=0
-          for pair in "$F1|$N1" "$F2|$N2" "$F3|$N3" "$F4|$N4" "$F5|$N5" "$F6|$N6" "$F7|$N7" "$F8|$N8" "$F9|$N9"; do
+          for pair in "$F1|$N1" "$F2|$N2" "$F3|$N3" "$F4|$N4" "$F5|$N5" "$F6|$N6" "$F7|$N7" "$F8|$N8" "$F9|$N9" "$F10|$N10"; do
             rel="${pair%%|*}"; n="${pair##*|}"
             if git merge-file -p -L "上游最新/$n" -L "改动前的原版/$n" -L "我们改完的/$n" \
                  "$WS/$rel" "$BASE/$n" "$RUNNER_TEMP/post-$n" > "$RUNNER_TEMP/merged-$n" 2>"$RUNNER_TEMP/merr-$n"; then
@@ -334,9 +340,13 @@ jobs:
 
           echo "── 3) 校验补丁效果确实生效 ──"
           fail=0
-          c=$(grep -c -F 'if (rawDp > 38)' "$WS/$F1" || true)
-          if [ "$c" != "2" ]; then echo "::error::'if (rawDp > 38)' 出现 $c 次，应为 2 次"; fail=1; fi
-          if grep -q -F 'val minBottomDp' "$WS/$F1"; then echo "::error::仍存在 val minBottomDp（18dp 兜底没去掉）"; fail=1; fi
+          # F1：v3.4.0 已内置 keyboardFlushBottom 贴底开关（上游默认 false），但本补丁的目的就是贴底，
+          # 故在 state 构造处强制 keyboardFlushBottom = true，并在备用 containment 计算处沿用 state.keyboardFlushBottom。
+          # 旧的「rawDp > 38」强制贴底逻辑与上游开关结构不兼容，必须彻底移除。
+          if grep -q -F 'if (rawDp > 38)' "$WS/$F1"; then echo "::error::F1 不应再残留旧的 'if (rawDp > 38)' 强制贴底逻辑"; fail=1; fi
+          if ! grep -q -F 'keyboardFlushBottom = true' "$WS/$F1"; then echo "::error::F1 强制开启贴底缺失（keyboardFlushBottom = true 未出现）"; fail=1; fi
+          if ! grep -q -F 'val activeBottomDp = if (state.keyboardFlushBottom) 0' "$WS/$F1"; then echo "::error::F1 备用 containment 计算未沿用 state.keyboardFlushBottom 强制贴底"; fail=1; fi
+          if ! grep -q -F '本地补丁：强制键盘贴底' "$WS/$F1"; then echo "::error::F1 补丁标记缺失"; fail=1; fi
           # 键区断言只看**代码行**：补丁自带的注释里会提到旧值 8.dp，直接 grep 会误判。
           # （上游该行现为 `.padding(start = if (tabletParams) 16.dp else 4.dp, …, bottom = 8.dp)`，
           #   我们只把 bottom 归零、保留上游新增的平板留边逻辑。）
@@ -434,8 +444,13 @@ jobs:
           c11=$(grep -c -F 'onBack()' "$WS/$F9" || true)
           if [ "$c11" != "1" ]; then echo "::error::符号浮层 onBack() 调用应只剩 1 处，实际 $c11 处"; fail=1; fi
           if ! grep -q -F '// 底部：返回 + 分类 Tab + 删除按钮' "$WS/$F9"; then echo "::error::符号浮层底部行注释没更新"; fail=1; fi
+          # F10：符号浮层（可能从数字面板等二级页打开）返回一律回到打字页，而非背后的数字页
+          if ! grep -q -F 'current.route == OverlayRoute.Symbol' "$WS/$F10"; then echo "::error::F10 符号浮层返回未特判 OverlayRoute.Symbol"; fail=1; fi
+          if ! grep -q -F 'KeyboardPage.Main(MainType.FULL)' "$WS/$F10"; then echo "::error::F10 符号浮层返回未落到打字页 Main(FULL)"; fail=1; fi
+          if ! grep -q -F '本地补丁：符号浮层' "$WS/$F10"; then echo "::error::F10 补丁标记缺失"; fail=1; fi
+          if ! grep -q -F 'else current.behind' "$WS/$F10"; then echo "::error::F10 非符号覆盖页（如其它浮层）未保留回背后页逻辑（行为回归）"; fail=1; fi
           if [ "$fail" != "0" ]; then exit 1; fi
-          echo "  ✓ 两处 38dp 阈值 + 去掉 18dp 兜底 + 键区内边距归零 + 底排外侧圆角 + 滑键改判（误触修复） + 无键帽全局开关（键面无底色无边框，旧「无键帽」主题已下架并迁移）+ 主题设置页开关 + 内置方案市场镜像索引 + ？↔％ 互换 + 新增「石墨纯黑」主题 + 去掉按键气泡 + 符号浮层返回键挪左下角，全部到位"
+          echo "  ✓ F1 强制开启键盘贴底（沿用上游 keyboardFlushBottom 开关，构造处强制 true）+ 键区内边距归零 + 底排外侧圆角 + 滑键改判（误触修复） + 无键帽全局开关（键面无底色无边框，旧「无键帽」主题已下架并迁移）+ 主题设置页开关 + 内置方案市场镜像索引 + ？↔％ 互换 + 新增「石墨纯黑」主题 + 去掉按键气泡 + 符号浮层返回键挪左下角 + F10 符号浮层返回回到打字页（而非数字页），全部到位"
           echo "── 相对上游的最终改动 ──"
           git --no-pager diff --stat
 
@@ -456,7 +471,8 @@ jobs:
           F7="app/src/main/java/com/kingzcheung/xime/viewmodel/ThemeSettingsViewModel.kt"
           F8="app/src/main/java/com/kingzcheung/xime/ui/keyboard/SwipeBubble.kt"
           F9="app/src/main/java/com/kingzcheung/xime/ui/keyboard/SymbolKeyboardLayout.kt"
-          python3 - "$F1" "$F2" "$F3" "$F4" "$F6" "$F7" "$F8" "$F9" <<'PYEOF'
+          F10="app/src/main/java/com/kingzcheung/xime/viewmodel/KeyboardViewModel.kt"
+          python3 - "$F1" "$F2" "$F3" "$F4" "$F6" "$F7" "$F8" "$F9" "$F10" <<'PYEOF'
           import sys
 
           def blank_noncode(text):
@@ -1012,9 +1028,10 @@ jobs:
             printf '<!-- alias-tag: %s -->\n' "$ALIAS_TAG"
             printf '\n%s\n\n' "$HEADLINE"
             printf '### 键盘布局\n'
-            printf -- '- 键盘底部不留白：手势导航时键区一直贴到屏幕最下边，不再空出一条；三键导航仍自动避让。\n'
+            printf -- '- 键盘底部默认贴到底：本补丁强制开启上游新增的「键盘贴底」开关（上游默认关闭，本补丁保持贴底）。\n'
             printf -- '- 键盘底部两个外角顺着屏幕圆角收进去，不再被切一刀。\n'
             printf -- '- 符号页的返回键从左上角挪到左下角，单手拇指够得着；宽度和圆角跟「删除」键一致，左右对称。\n'
+            printf -- '- 符号页的「返回」现在回到打字（字母）页，不再回到数字页。\n'
             printf -- '- 长按弹出的气泡里也能直接挑「上滑符号」了（原来只有直接上滑才出得来）。\n'
             printf -- '- 去掉了按键气泡（按住时弹出的那个小浮层），打字时更干净；长按选字的弹窗保留。\n'
             printf '\n### 外观\n'
