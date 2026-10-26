@@ -1,26 +1,3 @@
---- a/app/src/main/java/com/kingzcheung/xime/service/XimeInputMethodService.kt
-+++ b/app/src/main/java/com/kingzcheung/xime/service/XimeInputMethodService.kt
-@@ -568,7 +568,9 @@
-             isSttEnabled = SettingsPreferences.isSttEnabled(this@XimeInputMethodService),
-             keyboardHeightDp = SettingsPreferences.getKeyboardHeightDp(this, isLandscape),
-             keyboardBottomPaddingDp = SettingsPreferences.getKeyboardBottomPaddingDp(this),
--            keyboardFlushBottom = SettingsPreferences.isKeyboardFlushBottom(this),
-+            // 本地补丁：强制键盘贴底（上游 v3.4.0 新增的 keyboardFlushBottom 开关默认 false，
-+            // 但本补丁的目的就是贴底，故强制为 true；用户仍可在「设置」里关掉贴底）。
-+            keyboardFlushBottom = true,
-             keyboardMarginStartDp = SettingsPreferences.getKeyboardMarginStartDp(this).coerceIn(0, maxMargin),
-             keyboardMarginEndDp = SettingsPreferences.getKeyboardMarginEndDp(this).coerceIn(0, maxMargin),
-             // 调节进行中的预览值同样收紧（旋转/折叠切换后可能超出新屏宽上限）
-@@ -1971,7 +1973,8 @@
-                     (bottomInsetPxState.value / density).toInt() else 0
-                 val extraShrink = if (rawDp >= 120) 8 else 0
-                 val bottomSpace = if (rawDp > 0) (rawDp - 8 - extraShrink).coerceAtLeast(0) else 0
--                val activeBottomDp = if (SettingsPreferences.isKeyboardFlushBottom(this)) 0
-+                // 本地补丁：与上方 state.keyboardFlushBottom 保持一致，强制贴底（上游开关默认 false）。
-+                val activeBottomDp = if (state.keyboardFlushBottom) 0
-                     else if (bottomSpace == 0) 18 else bottomSpace
-                 // 独立 IME 面板：承载区比屏高小得多，首帧高度同样要装得下
-                 val fittedHeight = KeyboardHostFit.fitContentHeightDp(
 --- a/app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyboardLayout.kt
 +++ b/app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyboardLayout.kt
 @@ -52,6 +52,7 @@
@@ -852,3 +829,14 @@
              _syncViewState()
          }
      }
+--- a/app/src/main/java/com/kingzcheung/xime/settings/SettingsPreferences.kt
++++ b/app/src/main/java/com/kingzcheung/xime/settings/SettingsPreferences.kt
+@@ -717,7 +717,7 @@
+     private const val KEY_KEYBOARD_FLUSH_BOTTOM = "keyboard_flush_bottom"
+ 
+     fun isKeyboardFlushBottom(context: Context): Boolean {
+-        return getPrefs(context).getBoolean(KEY_KEYBOARD_FLUSH_BOTTOM, false)
++        return getPrefs(context).getBoolean(KEY_KEYBOARD_FLUSH_BOTTOM, true)
+     }
+ 
+     fun setKeyboardFlushBottom(context: Context, enabled: Boolean) {
