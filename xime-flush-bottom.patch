@@ -14,7 +14,31 @@
      /** 悬浮键盘拖到底部"松手切换非悬浮"的提示态：拖动回调边沿写入（进入时震动一次），
       *  松手在 onFloatingKeyboardDragEnd 消费；底部光效（FloatingExitGlow）按它显隐 */
      internal val floatingExitHintState = mutableStateOf(false)
-@@ -659,11 +666,7 @@
+@@ -535,13 +542,19 @@
+         InlineSuggestionManager(this)
+     } else null
+     
+-    private fun loadDarkModePreference() {
+-        val isLandscape = resources.configuration.screenWidthDp > resources.configuration.screenHeightDp
++    private fun loadDarkModePreference(config: android.content.res.Configuration? = null) {
++        // 方向以「入参 newConfig」为权威来源：InputMethodService 的 resources.configuration
++        // 在 onConfigurationChanged 触发瞬间往往尚未刷新到新方向（与 uiMode 滞后同理），
++        // 若此处读 resources.configuration，横屏→竖屏旋转时 isLandscape 仍算成 true，
++        // 会按「横屏偏好」重新读回 floating_mode_landscape(=true)，导致悬浮键盘在竖屏退不出去。
++        // 非方向变更场景（首启/偏好变更）不传参，退回 resources.configuration（此时方向已稳定，正确）。
++        val cfg = config ?: resources.configuration
++        val isLandscape = cfg.screenWidthDp > cfg.screenHeightDp
+         val isFloatingMode = SettingsPreferences.isFloatingMode(this, isLandscape)
+         val loadedX = SettingsPreferences.getFloatingOffsetX(this, isLandscape)
+         val loadedY = SettingsPreferences.getFloatingOffsetY(this, isLandscape)
+-        val screenW = resources.configuration.screenWidthDp
+-        val screenH = resources.configuration.screenHeightDp
++        val screenW = cfg.screenWidthDp
++        val screenH = cfg.screenHeightDp
+         val portraitWidth = minOf(screenW, screenH)
+         val halfMargin = FloatingCardGeometry.halfMarginDp(screenW, portraitWidth)
+         val kbH = SettingsPreferences.getKeyboardHeightDp(this, isLandscape)
+@@ -659,11 +672,7 @@
      fun isDarkTheme(): Boolean {
          return when (uiState.value.darkMode) {
              DARK_MODE_DARK -> true
@@ -27,7 +51,7 @@
              else -> false
          }
      }
-@@ -680,6 +683,10 @@
+@@ -680,6 +689,10 @@
          window.window?.decorView?.setViewTreeSavedStateRegistryOwner(this)
          lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
          lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
@@ -38,7 +62,7 @@
          
          
          FileLogger.init(this)
-@@ -2581,6 +2588,13 @@
+@@ -2581,11 +2594,18 @@
          hasHardwareKeyboard = SettingsPreferences.isHardwareKeyboardDetectionEnabled(this) &&
              newConfig.keyboard != android.content.res.Configuration.KEYBOARD_NOKEYS
          super.onConfigurationChanged(newConfig)
@@ -52,6 +76,12 @@
          if (newConfig.screenWidthDp > newConfig.screenHeightDp) {
              closeToolPanel()
          }
+         applyCompactMode()
+-        loadDarkModePreference()
++        loadDarkModePreference(newConfig)
+         applyWindowBackground()
+         updateCursorUpdateMonitoring()
+         if (localeChanged) {
 --- a/app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyboardLayout.kt
 +++ b/app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyboardLayout.kt
 @@ -52,6 +52,7 @@
