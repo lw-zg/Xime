@@ -1,87 +1,14 @@
 --- a/app/src/main/java/com/kingzcheung/xime/service/XimeInputMethodService.kt
 +++ b/app/src/main/java/com/kingzcheung/xime/service/XimeInputMethodService.kt
-@@ -284,6 +284,13 @@
-     internal val mainHandler = Handler(Looper.getMainLooper())
-     
-     internal val uiState = mutableStateOf(InputUIState())
-+    // 系统深浅色切换：InputMethodService 的 resources.configuration 在 uiMode 变化后往往尚未刷新，
-+    // 故在 onConfigurationChanged 用「入参 newConfig」实时算出系统夜间态写入 systemNightState；
-+    // 该 State 在 isDarkTheme()(SYSTEM 分支) 组合时被读取，写入即触发键盘重组并取到最新值。
-+    // ⚠ 不能用「未使用的局部读取」去订阅（R8 会把整段死代码删掉），也不能靠 uiState.copy()——
-+    // mutableStateOf 默认结构相等，字段未变时 copy 不触发重组。窗口兜底背景由 applyWindowBackground 单独处理。
-+    private val systemNightState = mutableStateOf(false)
-+    private var lastNightMode = -1
-     /** 悬浮键盘拖到底部"松手切换非悬浮"的提示态：拖动回调边沿写入（进入时震动一次），
-      *  松手在 onFloatingKeyboardDragEnd 消费；底部光效（FloatingExitGlow）按它显隐 */
-     internal val floatingExitHintState = mutableStateOf(false)
-@@ -535,13 +542,19 @@
-         InlineSuggestionManager(this)
-     } else null
-     
--    private fun loadDarkModePreference() {
--        val isLandscape = resources.configuration.screenWidthDp > resources.configuration.screenHeightDp
-+    private fun loadDarkModePreference(config: android.content.res.Configuration? = null) {
-+        // 方向以「入参 newConfig」为权威来源：InputMethodService 的 resources.configuration
-+        // 在 onConfigurationChanged 触发瞬间往往尚未刷新到新方向（与 uiMode 滞后同理），
-+        // 若此处读 resources.configuration，横屏→竖屏旋转时 isLandscape 仍算成 true，
-+        // 会按「横屏偏好」重新读回 floating_mode_landscape(=true)，导致悬浮键盘在竖屏退不出去。
-+        // 非方向变更场景（首启/偏好变更）不传参，退回 resources.configuration（此时方向已稳定，正确）。
-+        val cfg = config ?: resources.configuration
-+        val isLandscape = cfg.screenWidthDp > cfg.screenHeightDp
-         val isFloatingMode = SettingsPreferences.isFloatingMode(this, isLandscape)
-         val loadedX = SettingsPreferences.getFloatingOffsetX(this, isLandscape)
-         val loadedY = SettingsPreferences.getFloatingOffsetY(this, isLandscape)
--        val screenW = resources.configuration.screenWidthDp
--        val screenH = resources.configuration.screenHeightDp
-+        val screenW = cfg.screenWidthDp
-+        val screenH = cfg.screenHeightDp
-         val portraitWidth = minOf(screenW, screenH)
-         val halfMargin = FloatingCardGeometry.halfMarginDp(screenW, portraitWidth)
-         val kbH = SettingsPreferences.getKeyboardHeightDp(this, isLandscape)
-@@ -659,11 +672,7 @@
-     fun isDarkTheme(): Boolean {
-         return when (uiState.value.darkMode) {
-             DARK_MODE_DARK -> true
--            DARK_MODE_SYSTEM -> {
--                val nightModeFlags = resources.configuration.uiMode and
--                        android.content.res.Configuration.UI_MODE_NIGHT_MASK
--                nightModeFlags == android.content.res.Configuration.UI_MODE_NIGHT_YES
--            }
-+            DARK_MODE_SYSTEM -> systemNightState.value
-             else -> false
-         }
-     }
-@@ -680,6 +689,10 @@
+@@ -680,8 +680,6 @@
          window.window?.decorView?.setViewTreeSavedStateRegistryOwner(this)
          lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
          lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
-+        // 初始化系统夜间态：用当前 resources.configuration（服务创建时即为最新）定初值，
-+        // 之后由 onConfigurationChanged 用 newConfig 实时更新。
-+        lastNightMode = resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK
-+        systemNightState.value = (lastNightMode == android.content.res.Configuration.UI_MODE_NIGHT_YES)
-         
-         
+-        
+-        
          FileLogger.init(this)
-@@ -2581,11 +2594,18 @@
-         hasHardwareKeyboard = SettingsPreferences.isHardwareKeyboardDetectionEnabled(this) &&
-             newConfig.keyboard != android.content.res.Configuration.KEYBOARD_NOKEYS
-         super.onConfigurationChanged(newConfig)
-+        // 系统深浅色切换：仅当「跟随系统」时，用入参 newConfig 实时算出夜间态写入 systemNightState，
-+        // 触发键盘重组并让 isDarkTheme()(SYSTEM 分支) 取到最新系统主题。
-+        val newNightMode = newConfig.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK
-+        if (lastNightMode != -1 && newNightMode != lastNightMode && uiState.value.darkMode == DARK_MODE_SYSTEM) {
-+            systemNightState.value = (newNightMode == android.content.res.Configuration.UI_MODE_NIGHT_YES)
-+        }
-+        lastNightMode = newNightMode
-         if (newConfig.screenWidthDp > newConfig.screenHeightDp) {
-             closeToolPanel()
-         }
-         applyCompactMode()
--        loadDarkModePreference()
-+        loadDarkModePreference(newConfig)
-         applyWindowBackground()
-         updateCursorUpdateMonitoring()
-         if (localeChanged) {
+         KeyTapLogger.init(this)
+         KeyTapLogger.enabled = SettingsPreferences.isKeyTapLogEnabled(this)
 --- a/app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyboardLayout.kt
 +++ b/app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyboardLayout.kt
 @@ -52,6 +52,7 @@
@@ -580,7 +507,7 @@
          reload(context)
      }
  
-@@ -535,6 +578,9 @@
+@@ -533,6 +576,9 @@
  
      /** 返回 color_schemes 中显式定义的按键背景色，未定义返回 null。 */
      fun getKeyBgColorOverride(themeId: String, isDark: Boolean): Color? {
@@ -592,7 +519,7 @@
          return resolveKeyBgColor(entry, isDark)
 --- a/app/src/main/assets/xime.yaml
 +++ b/app/src/main/assets/xime.yaml
-@@ -11,6 +11,10 @@
+@@ -17,6 +17,10 @@
    # 可替换为自建代理/镜像，下载器按顺序依次尝试，直到成功为止。
    # 末尾需要 /。
    base_urls:
@@ -603,7 +530,7 @@
      - "https://cdn.jsdelivr.net/gh/ximeiorg/xime-index@master/"
      - "https://fastly.jsdelivr.net/gh/ximeiorg/xime-index@master/"
      - "https://index.ximei.me/"
-@@ -37,7 +41,8 @@
+@@ -43,7 +47,8 @@
  # 「完整词条 / 合法前缀 / 非法码」三值判定（仍可纠错，词间区分度弱一些），
  # 任何时候都不会用其他方案的频次。
  correction:
@@ -613,7 +540,7 @@
  
  # 配色方案可配置背景类型（纯色/渐变/图片），默认均为纯色。
  # 如需渐变/图片背景，在 xime.custom.yaml 的对应主题下覆盖 keyboard_background 即可：
-@@ -117,6 +122,18 @@
+@@ -134,6 +139,18 @@
        type: solid
        color: 0xE3E4E8
        color_dark: 0x1A1A1A
@@ -632,7 +559,7 @@
    
    rose_pink:
      name: "浪漫玫瑰"
-@@ -526,9 +543,9 @@
+@@ -564,9 +581,9 @@
        z: { tap: "z", swipe_up: { label: "＊", value: "*" }, swipe_down: { label: "", action: "none", display: "key", bubble: false }, long_press: { display: "bubble", values: [{ action: commit, value: "z" }, { action: commit, value: "Z" }] } }
        x: { tap: "x", swipe_up: { label: "＠", value: "@" }, swipe_down: { label: "弓匕纟幺弓𠤎", action: "none", display: "bubble" }, long_press: { display: "bubble", values: [{ action: commit, value: "x" }, { action: commit, value: "X" }] } }
        c: { tap: "c", swipe_up: { label: "、", value: "、" }, swipe_down: { label: "又巴马厶龴ス", action: "none", display: "bubble" }, long_press: { display: "bubble", values: [{ action: commit, value: "c" }, { action: commit, value: "C" }, { action: commit, value: "ç" }] } }
@@ -644,7 +571,7 @@
        m: { tap: "m", swipe_up: { label: "＃", value: "#" }, swipe_down: { label: "山由贝冂冎几", action: "none", display: "bubble" }, long_press: { display: "bubble", values: [{ action: commit, value: "m" }, { action: commit, value: "M" }] } }
        # shift：单击切单击态、双击锁定大写；命令值走键盘按键路由（shift_single / shift_caps）
        shift: { width: 1.4, tap: { action: command, value: shift_single }, double_tap: { action: command, value: shift_caps } }
-@@ -598,9 +615,9 @@
+@@ -636,9 +653,9 @@
        z: { tap: "z", swipe_up: "*", long_press: { display: "bubble", values: [{ action: commit, value: "z" }, { action: commit, value: "Z" }] } }
        x: { tap: "x", swipe_up: "@", long_press: { display: "bubble", values: [{ action: commit, value: "x" }, { action: commit, value: "X" }] } }
        c: { tap: "c", swipe_up: "、", long_press: { display: "bubble", values: [{ action: commit, value: "c" }, { action: commit, value: "C" }] } }
@@ -656,7 +583,7 @@
        m: { tap: "m", swipe_up: "#", long_press: { display: "bubble", values: [{ action: commit, value: "m" }, { action: commit, value: "M" }] } }
        # shift：单击切单击态、双击锁定大写（命令值走键盘按键路由）
        shift: { width: 1.4, tap: { action: command, value: shift_single }, double_tap: { action: command, value: shift_caps } }
-@@ -669,9 +686,9 @@
+@@ -707,9 +724,9 @@
        z: { tap: { value: "z", bubble: false }, swipe_up: { label: "＊", value: "*" }, swipe_down: { label: "", action: "none", display: "key", bubble: false }, long_press: { display: "bubble", values: [{ action: commit, value: "z" }, { action: commit, value: "Z" }] } }
        x: { tap: { value: "x", bubble: false }, swipe_up: { label: "＠", value: "@" }, swipe_down: { label: "弓匕纟幺弓𠤎", action: "none", display: "bubble" }, long_press: { display: "bubble", values: [{ action: commit, value: "x" }, { action: commit, value: "X" }] } }
        c: { tap: { value: "c", bubble: false }, swipe_up: { label: "、", value: "、" }, swipe_down: { label: "又巴马厶龴ス", action: "none", display: "bubble" }, long_press: { display: "bubble", values: [{ action: commit, value: "c" }, { action: commit, value: "C" }, { action: commit, value: "ç" }] } }
@@ -668,7 +595,7 @@
        m: { tap: { value: "m", bubble: false }, swipe_up: { label: "＃", value: "#" }, swipe_down: { label: "山由贝冂冎几", action: "none", display: "bubble" }, long_press: { display: "bubble", values: [{ action: commit, value: "m" }, { action: commit, value: "M" }] } }
        # 逗号/句号独立成键（value 经 rime 引擎，中文态自动转全角）
        comma: { width: 1, tap: {  label: "，", value: ",", bubble: false } }
-@@ -724,9 +741,9 @@
+@@ -762,9 +779,9 @@
        z: { tap: { value: "z", bubble: false }, swipe_up: "*", long_press: { display: "bubble", values: [{ action: commit, value: "z" }, { action: commit, value: "Z" }] } }
        x: { tap: { value: "x", bubble: false }, swipe_up: "@", long_press: { display: "bubble", values: [{ action: commit, value: "x" }, { action: commit, value: "X" }] } }
        c: { tap: { value: "c", bubble: false }, swipe_up: "、", long_press: { display: "bubble", values: [{ action: commit, value: "c" }, { action: commit, value: "C" }] } }
