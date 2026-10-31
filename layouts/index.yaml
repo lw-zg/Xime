@@ -1,0 +1,360 @@
+# Xime 键盘布局子索引
+# ⚠️ 此文件由 scripts/ci-update.py 自动生成，请勿手动编辑
+index_version: 1
+updated_at: '2026-10-30'
+layouts:
+- id: comma_period
+  name: 逗号句号分开布局
+  author: Kor1
+  description: 逗号句号分开在空格键两边
+  tags:
+  - 布局
+  - 全键盘
+  repo: https://github.com/cz-archive/comma_period
+  license: GPL-3.0
+  appVersion: '>=3.0.0'
+  requiresSchemes: []
+  screenshots:
+  - https://cdn.jsdelivr.net/gh/cz-archive/comma_period@1.0.0/0.jpg
+  currentVersion: 1.0.0
+  versions:
+  - version: 1.0.0
+    date: '2026-10-18'
+    changelog: 首个版本：标准 4 行布局 + 顶部数字行（中英各 5 行）。
+    downloadUrl:
+    - url: https://github.com/cz-archive/comma_period/releases/download/1.0.0/xime.custom.yaml
+      sha256: 3727498bc94c0867affb14a4af1942572855d720a3cdbae2a93cd8ce651b4099
+      size: 1.4 KB
+- id: flypy
+  name: 小鹤双拼带韵母
+  author: Kor1
+  description: 专属于小鹤双拼版本。
+  tags:
+  - 布局
+  - 全键盘
+  repo: https://github.com/cz-archive/flypy
+  license: GPL-3.0
+  appVersion: '>=3.0.0'
+  requiresSchemes: []
+  screenshots:
+  - https://cdn.jsdelivr.net/gh/cz-archive/flypy@1.0.1/images/0.jpg
+  currentVersion: 1.0.1
+  versions:
+  - version: 1.0.1
+    date: '2026-10-01'
+    changelog: fix bugs。
+    downloadUrl:
+    - url: https://github.com/cz-archive/flypy/releases/download/1.0.1/xime.custom.yaml
+      sha256: 374436059654282d191cbaef10eeb2a33fc00d8566e268556a6434cb9429a7c4
+      size: 11.9 KB
+  - version: 1.0.0
+    date: '2026-09-25'
+    changelog: 首个版本。
+    downloadUrl:
+    - url: https://cdn.jsdelivr.net/gh/cz-archive/flypy@c906ab6b2ae87e07f659ec3a2a98fafdce7656ae/xime.custom.yaml
+      sha256: 3c54792cf406de0f08df343e22db8555d793b9028e9369299ed125505edaa298
+      size: 10.8 KB
+- id: msdouble
+  name: 双拼布局（微软双拼）
+  author: Kor1
+  description: 专属于微软双拼版本。
+  tags:
+  - 布局
+  - 全键盘
+  repo: https://github.com/cz-archive/msdouble
+  license: GPL-3.0
+  appVersion: '>=3.0.0'
+  requiresSchemes: []
+  screenshots:
+  - https://cdn.jsdelivr.net/gh/cz-archive/msdouble@1.0.0/images/0.jpg
+  currentVersion: 1.0.0
+  versions:
+  - version: 1.0.0
+    date: '2026-09-25'
+    changelog: 首个版本。
+    downloadUrl:
+    - url: https://github.com/cz-archive/msdouble/releases/download/1.0.0/xime.custom.yaml
+      sha256: 546818990de4e6ed93a4b7f3ea7534141d317b9f89b47d59ddd5d5a54142fb33
+      size: 13.6 KB
+- id: no_bubble
+  name: 无气泡布局
+  author: Kor1
+  description: 给全键盘布局去掉气泡提示，适合熟练用户使用。
+  tags:
+  - 布局
+  - 全键盘
+  repo: https://github.com/cz-archive/no_bubble
+  license: GPL-3.0
+  appVersion: '>=3.0.0'
+  requiresSchemes: []
+  screenshots:
+  - https://cdn.jsdelivr.net/gh/cz-archive/no_bubble@1.0.0/0.jpg
+  currentVersion: 1.0.0
+  versions:
+  - version: 1.0.0
+    date: '2026-10-02'
+    changelog: 首个版本。
+    downloadUrl:
+    - url: https://github.com/cz-archive/no_bubble/releases/download/1.0.0/xime.custom.yaml
+      sha256: a2d9a4a389fbea72a0a641602ca3e0f967015f3c9b2a4d524d4f97fba420fa30
+      size: 27.7 KB
+- id: number_rows
+  name: 数字行
+  author: Kor1
+  description: 在标准全键盘上方新增一行数字，中文键盘长按出符号、英文键盘直接上屏。
+  tags:
+  - 布局
+  - 全键盘
+  repo: https://github.com/cz-archive/number_rows
+  license: GPL-3.0
+  appVersion: '>=3.0.0'
+  requiresSchemes: []
+  screenshots:
+  - https://cdn.jsdelivr.net/gh/cz-archive/number_rows@1.0.1/images/number_rows.jpg
+  currentVersion: 1.0.1
+  versions:
+  - version: 1.0.1
+    date: '2026-10-18'
+    changelog: 内容与 1.0.0 相同，改为通过 Release 附件分发。
+    downloadUrl:
+    - url: https://github.com/cz-archive/number_rows/releases/download/1.0.1/xime.custom.yaml
+      sha256: 88d6e994f193a74ae8be95e134f46cbccbb39d970aed68e6e720dff560b0e271
+      size: 2.5 KB
+  - version: 1.0.0
+    date: '2026-09-24'
+    changelog: 首个版本：标准 4 行布局 + 顶部数字行（中英各 5 行）。
+    downloadUrl:
+    - url: https://cdn.jsdelivr.net/gh/cz-archive/number_rows@3ee546e083acd2e93149ed9d71388a4b3f2dd8cc/xime.custom.yaml
+      sha256: 88d6e994f193a74ae8be95e134f46cbccbb39d970aed68e6e720dff560b0e271
+      size: 2.5 KB
+- id: qq_pinyin
+  name: QQ拼音版布局
+  author: YeJing22
+  description: 一比一复刻 QQ 拼音的中文九宫格、英文与数字键盘，仅改动这三套键盘。九键手势绑定高频动作：1 复制、2 换行、3 剪切、4 全选、5
+    四向移光标与行首行尾、6 粘贴、7/8/9 send_rime 上屏逗号冒号句号；英文 q-p 上滑数字、a-l 上滑标点、z-m 上滑符号。不含配色与字体，套用后原主题不变。
+  tags:
+  - 布局
+  - 快捷键
+  repo: https://github.com/YeJing22/xime-layout-qq-pinyin
+  license: MIT
+  appVersion: '>=3.3.0'
+  requiresSchemes: []
+  screenshots:
+  - https://raw.githubusercontent.com/YeJing22/xime-layout-qq-pinyin/1c919a0e6c5a3403543c8a58b8dd160b5a401c98/screenshots/01-t9.jpg
+  - https://raw.githubusercontent.com/YeJing22/xime-layout-qq-pinyin/1c919a0e6c5a3403543c8a58b8dd160b5a401c98/screenshots/02-en.jpg
+  - https://raw.githubusercontent.com/YeJing22/xime-layout-qq-pinyin/1c919a0e6c5a3403543c8a58b8dd160b5a401c98/screenshots/03-number.jpg
+  warning: 本布局仅针对九键、英文 26 键与数字键盘设计。因九键的切换语言键与数字键位置做过对调，若你主要使用中文全键盘，切换时可能遇到语言键/数字键位置反复变化，建议先试用再长期使用。
+  currentVersion: 1.0.1
+  versions:
+  - version: 1.0.1
+    date: '2026-10-30'
+    changelog: 兼容版本提高到 3.3.0（数字键盘自定义布局晚于 3.0 加入，3.0 上应用会失效）。键位未改动。
+    downloadUrl:
+    - url: https://github.com/YeJing22/xime-layout-qq-pinyin/releases/download/1.0.1/xime.custom.yaml
+      sha256: e0ef83f2571d08b2d7c20a60433b63db75d314e2b7a80f732fd2d899cbcc2889
+      size: 8.6 KB
+  - version: 1.0.0
+    date: '2026-10-30'
+    changelog: 初始版本：九键手势快捷、英文上滑数字与标点、数字键盘按 QQ 拼音排布。
+    downloadUrl:
+    - url: https://github.com/YeJing22/xime-layout-qq-pinyin/releases/download/1.0.0/xime.custom.yaml
+      sha256: 18783a2c64b5351c34240ca667d805dd0953cbfd081a5129765b636458ac18af
+      size: 8.6 KB
+- id: wubi_compact
+  name: 五笔86紧凑布局
+  author: Kor1
+  description: 五笔86紧凑布局，显示五笔86版本的字根在按键上。
+  tags:
+  - 布局
+  - 全键盘
+  repo: https://github.com/cz-archive/wubi_compact
+  license: GPL-3.0
+  appVersion: '>=3.0.0'
+  requiresSchemes: []
+  screenshots:
+  - https://cdn.jsdelivr.net/gh/cz-archive/wubi_compact@1.0.1/images/0.jpg
+  currentVersion: 1.0.1
+  versions:
+  - version: 1.0.1
+    date: '2026-09-25'
+    changelog: 首个版本：标准 4 行布局 + 顶部数字行（中英各 5 行）。
+    downloadUrl:
+    - url: https://github.com/cz-archive/wubi_compact/releases/download/1.0.1/xime.custom.yaml
+      sha256: 30684dc7767d5a654031f3c38dfb7b3973a70140e2fd1012468c59b18dbe10a9
+      size: 10.4 KB
+- id: xime_26key_enhance
+  name: 26键多功能布局
+  author: C.C.
+  description: 数字与字母上滑输入常用标点与符号,禁用空格语音输入,上/下滑均可触发 A/全选、S/重复上次输入、Z/撤销、X/剪切、C/复制、V/粘贴、B/换行、N/行首、M/行尾
+  tags:
+  - 资源加速
+  - 全键盘
+  - 全功能键盘
+  repo: https://github.com/MajoSissi/xime-26key-enhance
+  homepage: https://github.com/MajoSissi/xime-26key-enhance
+  license: GPL-3.0
+  appVersion: '>=3.0.0'
+  requiresSchemes: []
+  screenshots:
+  - https://cdn.jsdelivr.net/gh/MajoSissi/xime-26key-enhance@3b2e27b8be98e47af48d4ae79e7f4e5d25ae5f21/images/0.jpg
+  - https://cdn.jsdelivr.net/gh/MajoSissi/xime-26key-enhance@3b2e27b8be98e47af48d4ae79e7f4e5d25ae5f21/images/1.jpg
+  currentVersion: 1.0.0
+  versions:
+  - version: 1.0.0
+    date: '2026-10-19'
+    changelog: 首版
+    downloadUrl:
+    - url: https://github.com/MajoSissi/xime-26key-enhance/releases/download/1.0.0/xime.custom.yaml
+      sha256: 3767bbeeab6d690b21a8eae55e6173740fcc42ef4b97b798ce95db884da846ff
+      size: 10.2 KB
+- id: xime_custom_themes
+  name: xime 多主题
+  author: tiengming
+  description: 为 Xime 键盘提供五套主题配色：星野夜航、Notion 极简、Claude 暖砂、Apple 原生、Material You 动态。一键切换，适配
+    Xime 3.0。
+  tags:
+  - 配色
+  repo: https://github.com/tiengming/xime_flypy_proxy
+  license: GPL-3.0
+  appVersion: '>=3.0.0'
+  requiresSchemes: []
+  screenshots:
+  - https://cdn.jsdelivr.net/gh/tiengming/xime_flypy_proxy@xime_theme-1.0.0/images/img1.jpg
+  - https://cdn.jsdelivr.net/gh/tiengming/xime_flypy_proxy@xime_theme-1.0.0/images/img2.jpg
+  - https://cdn.jsdelivr.net/gh/tiengming/xime_flypy_proxy@xime_theme-1.0.0/images/img3.jpg
+  - https://cdn.jsdelivr.net/gh/tiengming/xime_flypy_proxy@xime_theme-1.0.0/images/img4.jpg
+  - https://cdn.jsdelivr.net/gh/tiengming/xime_flypy_proxy@xime_theme-1.0.0/images/img5.jpg
+  currentVersion: 1.1.0
+  versions:
+  - version: 1.1.0
+    date: '2026-10-25'
+    changelog: 补齐五套配色的候选选中色（candidate_selected_text_color）；Material You 动态按 M3 2024
+      基准校准表面色阶；全部配色通过 WCAG 对比度校验；新增 README。
+    downloadUrl:
+    - url: https://github.com/tiengming/xime_flypy_proxy/releases/download/xime_theme-1.1.0/xime.custom.yaml
+      sha256: 0ed1cb8e85f1d9e7f1e0f0875c1d48976e61d2a84e32b1119f61d24e51a50b51
+      size: 4.3 KB
+  - version: 1.0.0
+    date: '2026-10-19'
+    changelog: 初始版本，包含五套主题配色（星野夜航 / Notion 极简 / Claude 暖砂 / Apple 原生 / Material You
+      动态）。
+    downloadUrl:
+    - url: https://github.com/tiengming/xime_flypy_proxy/releases/download/xime_theme-1.0.0/xime.custom.yaml
+      sha256: aa3008cb63a1c2ee63df5bf30fb9d427433b0b62967a27c6a5fed55c663347d1
+      size: 3.5 KB
+- id: xime_flypy_proxy
+  name: 小鹤双拼多功能配置
+  author: tiengming
+  description: 专为小鹤双拼优化的键盘布局，支持加速下载扩展商店资源，提供中英文 26 键，下滑显示韵母/声母提示，上滑显示常用中文标点与符号，内置多款精美主题，适配
+    Xime 3.0。
+  tags:
+  - 加速商店资源
+  - 全功能键盘
+  - 多主题
+  repo: https://github.com/tiengming/xime_flypy_proxy
+  license: GPL-3.0
+  appVersion: '>=3.0.0'
+  requiresSchemes: []
+  screenshots:
+  - https://cdn.jsdelivr.net/gh/tiengming/xime_flypy_proxy@xime_flypy_proxy-v1.0.1/images/img1.jpg
+  - https://cdn.jsdelivr.net/gh/tiengming/xime_flypy_proxy@xime_flypy_proxy-v1.0.1/images/img2.jpg
+  - https://cdn.jsdelivr.net/gh/tiengming/xime_flypy_proxy@xime_flypy_proxy-v1.0.1/images/img3.jpg
+  - https://cdn.jsdelivr.net/gh/tiengming/xime_flypy_proxy@xime_flypy_proxy-v1.0.1/images/img4.jpg
+  - https://cdn.jsdelivr.net/gh/tiengming/xime_flypy_proxy@xime_flypy_proxy-v1.0.1/images/img5.jpg
+  currentVersion: 1.0.2
+  versions:
+  - version: 1.0.2
+    date: '2026-10-27'
+    changelog: 修复五套配色的亮色候选选中色（2.0~2.7→≥3:1）与暗色特殊键对比度（2.6~4.3→≥4.5:1），键位与字体未变。
+    downloadUrl:
+    - url: https://github.com/tiengming/xime_flypy_proxy/releases/download/xime_flypy_proxy-1.0.2/xime.custom.yaml
+      sha256: c04fe40406f2045b1bdfbe760f0fd10eaafcea54f7719577f7551f430fa8919b
+      size: 17.3 KB
+  - version: 1.0.1
+    date: '2026-10-11'
+    changelog: 优化截图体积，单文件交付。
+    downloadUrl:
+    - url: https://github.com/tiengming/xime_flypy_proxy/releases/download/xime_flypy_proxy-v1.0.1/xime.custom.yaml
+      sha256: 24aa932b792ef0fc6d2f8e61daf1d8b7b736ffa563d6038cbc41a61b8d991b0f
+      size: 17 KB
+- id: xime_index_net
+  name: 扩展商店资源加速
+  author: tiengming
+  description: 提供 CDN 加速下载 Xime 扩展商店资源，优化扩展安装体验。
+  tags:
+  - 资源加速
+  - xime_index
+  repo: https://github.com/tiengming/xime_flypy_proxy
+  license: GPL-3.0
+  appVersion: '>=2.5.0'
+  requiresSchemes: []
+  screenshots:
+  - https://cdn.jsdelivr.net/gh/tiengming/xime_flypy_proxy@xime_index_net-v1.0.1/images/img1.jpg
+  currentVersion: 1.0.1
+  versions:
+  - version: 1.0.1
+    date: '2026-10-11'
+    changelog: 优化截图体积，单文件交付。
+    downloadUrl:
+    - url: https://github.com/tiengming/xime_flypy_proxy/releases/download/xime_index_net-v1.0.1/xime.custom.yaml
+      sha256: 5d5b766d4223c868c2f52d7a63b40f6115f80136dce45c48ac6f7ab8fb859e81
+      size: 351 B
+- id: xime_layout_romaji
+  name: 日语罗马音键盘
+  author: 抹露茶柒
+  description: 标准 QWERTY 26 个字母键 + 1 个长音键（-），献给日语罗马音输入。键面不放假名助记，上滑出数字与日文常用标点。
+  tags:
+  - 布局
+  - 全键盘
+  - 输入法适配
+  repo: https://github.com/MoruTeaven/xime-layout-romaji
+  homepage: https://github.com/MoruTeaven/xime-layout-romaji
+  license: Apache-2.0
+  appVersion: '>=3.0.0'
+  requiresSchemes: []
+  screenshots:
+  - https://cdn.jsdelivr.net/gh/MoruTeaven/xime-layout-romaji@1.0.0/images/keyboard.png
+  currentVersion: 1.0.0
+  versions:
+  - version: 1.0.0
+    date: '2026-10-21'
+    changelog: 首个版本：标准 QWERTY 26 键 + 第二行长音键，上滑数字与日文常用标点。
+    downloadUrl:
+    - url: https://github.com/MoruTeaven/xime-layout-romaji/releases/download/1.0.0/xime.custom.yaml
+      sha256: 262ff763e1604e1a5175cf3dcbc524ed6e3a7d346422111b2f170ffb009a8b0b
+      size: 8.6 KB
+- id: xime_theme_pack
+  name: xime 主题包
+  author: tiengming
+  description: 15 套主题大合集，合并一份配置应用内随意切换、互不顶替：Material You 家族 ×4（紫罗兰/暖玫瑰/海蓝/松绿）、渐变家族
+    ×5（极光/暮霞/薄荷/樱粉/深海）、图片背景场景 ×6（银河/晨雾/远山/樱吹雪/星月/海平线，各含暗色变体）；键面 Maple Mono NL CN +
+    候选霞鹜文楷（均 SIL OFL 1.1），10 张原创程序化背景图。适配 Xime 3.0。
+  tags:
+  - 配色
+  repo: https://github.com/tiengming/xime_flypy_proxy
+  license: GPL-3.0
+  appVersion: '>=3.0.0'
+  requiresSchemes: []
+  screenshots:
+  - https://cdn.jsdelivr.net/gh/tiengming/xime_flypy_proxy@xime_theme_pack-1.1.0/images/img1.jpg
+  - https://cdn.jsdelivr.net/gh/tiengming/xime_flypy_proxy@xime_theme_pack-1.1.0/images/img2.jpg
+  - https://cdn.jsdelivr.net/gh/tiengming/xime_flypy_proxy@xime_theme_pack-1.1.0/images/img3.jpg
+  - https://cdn.jsdelivr.net/gh/tiengming/xime_flypy_proxy@xime_theme_pack-1.1.0/images/img4.jpg
+  - https://cdn.jsdelivr.net/gh/tiengming/xime_flypy_proxy@xime_theme_pack-1.1.0/images/img5.jpg
+  currentVersion: 1.2.0
+  versions:
+  - version: 1.2.0
+    date: '2026-10-27'
+    changelog: 修复图片主题展开候选页亮色白底白字（银河漫游/星月童话补深空底色）；暗色特殊键与候选选中色统一达到 4.5:1 / 3:1；更正背景图数量与截图说明。
+    downloadUrl:
+    - url: https://github.com/tiengming/xime_flypy_proxy/releases/download/xime_theme_pack-1.2.0/xime_theme_pack.zip
+      sha256: fec27d21af97d69d4be531ee8a39bfe1f6733dcf74cd5b254395f8c563c0e1ce
+      size: 20.2 MB
+  - version: 1.1.0
+    date: '2026-10-25'
+    changelog: 首个上架版本：15 套配色（Material You 家族×4 / 渐变×5 / 图片场景×6，各含暗色变体）；键面 Maple Mono
+      NL CN（圆角等宽含 CJK、无连字）+ 候选霞鹜文楷（均 SIL OFL 1.1）；11 张原创程序化背景图；玻璃质感无阴影设计。
+    downloadUrl:
+    - url: https://github.com/tiengming/xime_flypy_proxy/releases/download/xime_theme_pack-1.1.0/xime_theme_pack.zip
+      sha256: bebe0c23bfa1f8ee2defcd6ae156dfc67570e73acfaa84607a1b7b0d6400fee2
+      size: 20.2 MB
