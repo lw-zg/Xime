@@ -1,6 +1,6 @@
 --- a/app/src/main/java/com/kingzcheung/xime/service/XimeInputMethodService.kt
 +++ b/app/src/main/java/com/kingzcheung/xime/service/XimeInputMethodService.kt
-@@ -680,8 +680,6 @@
+@@ -681,8 +681,6 @@
          window.window?.decorView?.setViewTreeSavedStateRegistryOwner(this)
          lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
          lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
@@ -19,7 +19,7 @@
  import com.kingzcheung.xime.correction.KeyTapLogger
  import com.kingzcheung.xime.R
  import com.kingzcheung.xime.settings.SettingsPreferences
-@@ -212,11 +213,18 @@
+@@ -202,11 +203,18 @@
  
      val swipeBubble = rememberSwipeBubbleController()
      var keyboardBounds by remember { mutableStateOf(Rect(0f, 0f, 0f, 0f)) }
@@ -38,7 +38,7 @@
          val newState = if (state.isSwipeDown && state.swipeText != null) {
              state.copy(charInfos = SubcharHelper.parseSwipeDownText(state.swipeText))
          } else {
-@@ -270,7 +278,71 @@
+@@ -260,7 +268,71 @@
                  else -> (kbKey.spacingFor("qwerty").second?.dp ?: 4.25.dp)
              },
          ),
@@ -110,7 +110,7 @@
      Box(
          modifier = modifier
              .onGloballyPositioned { coordinates ->
-@@ -278,6 +350,7 @@
+@@ -268,6 +340,7 @@
                  // 按键坐标日志需要键盘矩形做跨设备归一化
                  KeyTapLogger.keyboardBounds = keyboardBounds
              }
@@ -118,7 +118,7 @@
              .drawWithContent {
                  drawContent()
                  bubbleData?.let { drawSwipeBubble(it) }
-@@ -301,7 +374,9 @@
+@@ -291,7 +364,9 @@
                          .fillMaxWidth()
                          .fillMaxHeight()
                          // 平板键盘两侧留边（Gboard 式不满宽），手机维持贴边紧凑
@@ -129,7 +129,7 @@
              ) {
  
                  Column(
-@@ -385,10 +460,22 @@
+@@ -376,10 +451,22 @@
                                      .fillMaxWidth(fraction)
                                      .align(Alignment.CenterHorizontally)
                              } else Modifier
@@ -153,7 +153,7 @@
                              )
                          }
                      }
-@@ -636,6 +723,13 @@
+@@ -646,6 +733,13 @@
  /** 平板键面圆角下限：键圆角与阴影圆角在平板上共同对齐此值，两处解析（主键盘/分体）共享。 */
  internal val TABLET_KEY_CORNER_RADIUS = 14.dp
  
@@ -167,7 +167,7 @@
  /** 平板键面提示（数字上标、退格的「清空」等）的额外放大倍率；主键盘与面板共用同一档。 */
  internal const val TABLET_HINT_EXTRA_SCALE = 1.35f
  
-@@ -665,6 +759,38 @@
+@@ -675,6 +769,38 @@
      kbKey.spacingOverrides[keyboard]?.cornerRadius?.dp
          ?: if (isTablet) maxOf(kbKey.cornerRadius.dp, TABLET_KEY_CORNER_RADIUS) else kbKey.cornerRadius.dp
  
@@ -206,7 +206,7 @@
  /** 主题调色板：主键盘正常路径、分体路径与面板渲染共用同一解析，防止多处取值漂移。 */
  internal data class KeyboardPalette(
      val keyboardBackgroundColor: Color,
-@@ -689,12 +815,16 @@
+@@ -699,12 +825,16 @@
      val specialKeyTextColor = KeyboardThemes.getSpecialKeyTextColorForBackground(
          specialKeyBackgroundColor, keyTextColor
      )
@@ -226,15 +226,29 @@
          bubbleBgColor = if (isDarkTheme) themeScheme.specialKeyDark else themeScheme.specialKeyLight,
      )
  }
-@@ -1697,6 +1827,7 @@
-     /** 手机横屏紧凑档：改用 [SwipeableKeyButtonLandscape]（主字符与上滑提示垂直堆叠、手势阈值收紧）。 */
-     compactButton: Boolean = false,
+@@ -915,8 +1045,11 @@
+ internal fun FunctionKeyCell(id: String, env: QwertyRowEnv, modifier: Modifier) {
+     // 按键级外观覆盖：只影响当前键，未配置时 keyEnv === env、圆角沿用外层
+     val style = keyStyleOverride(env.section, id, env.isAsciiMode, env.isDarkTheme)
+-    val keyEnv = env.withKeyStyle(style)
+-    val radius = style.cornerRadius ?: LocalKeyCornerRadius.current
++    // ── 本地补丁：无键帽模式（全局开关）优先，忽略按键级 background 覆盖，
++    //    避免逐键配色把已隐藏的键帽底色重新带回来（文字色/圆角覆盖保留）。
++    val styleEffective = if (env.keyBackgroundColor.alpha < 0.05f) style.copy(background = null) else style
++    val keyEnv = env.withKeyStyle(styleEffective)
++    val radius = styleEffective.cornerRadius ?: LocalKeyCornerRadius.current
+     CompositionLocalProvider(LocalKeyCornerRadius provides radius) {
+         when (id) {
+             "shift" -> ShiftCell(keyEnv, modifier)
+@@ -1736,6 +1869,7 @@
+     /** 当前是否暗色主题：按键级 background_dark 按此选择。 */
+     isDarkTheme: Boolean = false,
  ) {
 +    val slideRegistry = LocalSlideKeyRegistry.current
      Row(
          modifier = modifier
              .fillMaxWidth(),
-@@ -1722,13 +1853,29 @@
+@@ -1761,13 +1895,29 @@
              // 长按选项
              val longPressConfig = KeysConfigHelper.getKeyGesture(key, isAsciiMode)?.longPress
              val longPressDisplay = longPressConfig?.display ?: DisplayMode.KEY
@@ -265,7 +279,7 @@
  
              // 键帽显示文本
              val rawCommitValue = KeysConfigHelper.getKeyCommitValue(key, isAsciiMode)
-@@ -1798,9 +1945,17 @@
+@@ -1837,14 +1987,29 @@
                      }
                  }
              } else null
@@ -285,11 +299,40 @@
 +                }
              } }
  
-             if (compactButton) {
-@@ -1811,7 +1966,14 @@
+             // 按键级外观覆盖（keys.<id> 的 corner_radius / background）；未配置时用行级默认
+             val keyStyle = keyStyleOverride("qwerty", key, isAsciiMode, isDarkTheme)
+-            val keyBackground = keyStyle.background ?: config.keyBackgroundColor
++            // ── 本地补丁：无键帽模式（全局开关）优先于上游的按键级 background 覆盖 ──
++            //    该模式下 resolveKeyboardPalette 已把键面底色置为 Color.Transparent；若用户
++            //    给单个键配了 background，上游 keyStyle.background 会把键帽底色带回来，这里屏蔽。
++            val keyBackground = if (config.keyBackgroundColor.alpha < 0.05f) {
++                Color.Transparent
++            } else {
++                keyStyle.background ?: config.keyBackgroundColor
++            }
+             val keyText = keyStyle.textColor ?: config.keyTextColor
+             val keyRadius = keyStyle.cornerRadius ?: LocalKeyCornerRadius.current
+ 
+@@ -1857,7 +2022,14 @@
+                         onClick = onClick,
+                         backgroundColor = keyBackground,
+                         textColor = keyText,
+-                        modifier = Modifier.weight(keyWidths?.getOrNull(index) ?: 1f),
++                        modifier = Modifier
++                            .weight(keyWidths?.getOrNull(index) ?: 1f)
++                            // ── 本地补丁：注册键位包围盒（滑键改判用，见 SlideKeyRegistry）──
++                            .then(
++                                if (slideRegistry != null)
++                                    Modifier.onGloballyPositioned { slideRegistry.register(key, it.boundsInRoot()) }
++                                else Modifier
++                            ),
+                         swipeText = swipeUpText,
+                         swipeDownText = swipeDownText,
+                         swipeUpKeyLabel = swipeUpKeyLabel,
+@@ -1886,7 +2058,14 @@
                      onClick = onClick,
-                     backgroundColor = config.keyBackgroundColor,
-                     textColor = config.keyTextColor,
+                     backgroundColor = keyBackground,
+                     textColor = keyText,
 -                    modifier = Modifier.weight(keyWidths?.getOrNull(index) ?: 1f),
 +                    modifier = Modifier
 +                        .weight(keyWidths?.getOrNull(index) ?: 1f)
@@ -302,23 +345,7 @@
                      swipeText = swipeUpText,
                      swipeDownText = swipeDownText,
                      swipeUpKeyLabel = swipeUpKeyLabel,
-@@ -1840,7 +2002,14 @@
-                 onClick = onClick,
-                 backgroundColor = config.keyBackgroundColor,
-                 textColor = config.keyTextColor,
--                modifier = Modifier.weight(keyWidths?.getOrNull(index) ?: 1f),
-+                modifier = Modifier
-+                    .weight(keyWidths?.getOrNull(index) ?: 1f)
-+                    // ── 本地补丁：注册键位包围盒（滑键改判用，见 SlideKeyRegistry）──
-+                    .then(
-+                        if (slideRegistry != null)
-+                            Modifier.onGloballyPositioned { slideRegistry.register(key, it.boundsInRoot()) }
-+                        else Modifier
-+                    ),
-                 swipeText = swipeUpText,
-                 swipeDownText = swipeDownText,
-                 swipeUpKeyLabel = swipeUpKeyLabel,
-@@ -1951,7 +2120,9 @@
+@@ -1998,7 +2177,9 @@
              .then(shadowModifier)
              .clip(keyClipShape)
              .background(
@@ -451,7 +478,7 @@
  import java.io.File
  import java.io.FileInputStream
  import java.io.InputStream
-@@ -100,6 +101,36 @@
+@@ -103,6 +104,36 @@
  )
  
  object KeyboardThemes {
@@ -488,7 +515,7 @@
      /** 从 xime.yaml 加载的配置覆盖项。 */
      private var configOverrides: Map<String, ColorSchemeEntry> = emptyMap()
  
-@@ -131,6 +162,18 @@
+@@ -134,6 +165,18 @@
  
      /** 从配置文件加载主题覆盖项。应在 Application.onCreate 中调用。 */
      fun initFromConfig(context: Context) {
@@ -507,7 +534,7 @@
          reload(context)
      }
  
-@@ -533,6 +576,9 @@
+@@ -555,6 +598,9 @@
  
      /** 返回 color_schemes 中显式定义的按键背景色，未定义返回 null。 */
      fun getKeyBgColorOverride(themeId: String, isDark: Boolean): Color? {
@@ -538,9 +565,9 @@
 +  # 本地补丁：追加 rime_mint（薄荷混输，全拼部分适用邻键纠错）
 +  schemas: [wubi86, wubi86_pinyin, pinyin_simp, rime_mint]
  
- # 配色方案可配置背景类型（纯色/渐变/图片），默认均为纯色。
- # 如需渐变/图片背景，在 xime.custom.yaml 的对应主题下覆盖 keyboard_background 即可：
-@@ -134,6 +139,18 @@
+ # ── 模糊拼音 ──
+ # 模糊规则（zh/z、n/l、an/ang…）是拼音字母层面的 speller/algebra fuzz，只对「全拼」
+@@ -148,6 +153,18 @@
        type: solid
        color: 0xE3E4E8
        color_dark: 0x1A1A1A
@@ -559,7 +586,7 @@
    
    rose_pink:
      name: "浪漫玫瑰"
-@@ -564,9 +581,9 @@
+@@ -593,9 +610,9 @@
        z: { tap: "z", swipe_up: { label: "＊", value: "*" }, swipe_down: { label: "", action: "none", display: "key", bubble: false }, long_press: { display: "bubble", values: [{ action: commit, value: "z" }, { action: commit, value: "Z" }] } }
        x: { tap: "x", swipe_up: { label: "＠", value: "@" }, swipe_down: { label: "弓匕纟幺弓𠤎", action: "none", display: "bubble" }, long_press: { display: "bubble", values: [{ action: commit, value: "x" }, { action: commit, value: "X" }] } }
        c: { tap: "c", swipe_up: { label: "、", value: "、" }, swipe_down: { label: "又巴马厶龴ス", action: "none", display: "bubble" }, long_press: { display: "bubble", values: [{ action: commit, value: "c" }, { action: commit, value: "C" }, { action: commit, value: "ç" }] } }
@@ -571,7 +598,7 @@
        m: { tap: "m", swipe_up: { label: "＃", value: "#" }, swipe_down: { label: "山由贝冂冎几", action: "none", display: "bubble" }, long_press: { display: "bubble", values: [{ action: commit, value: "m" }, { action: commit, value: "M" }] } }
        # shift：单击切单击态、双击锁定大写；命令值走键盘按键路由（shift_single / shift_caps）
        shift: { width: 1.4, tap: { action: command, value: shift_single }, double_tap: { action: command, value: shift_caps } }
-@@ -636,9 +653,9 @@
+@@ -665,9 +682,9 @@
        z: { tap: "z", swipe_up: "*", long_press: { display: "bubble", values: [{ action: commit, value: "z" }, { action: commit, value: "Z" }] } }
        x: { tap: "x", swipe_up: "@", long_press: { display: "bubble", values: [{ action: commit, value: "x" }, { action: commit, value: "X" }] } }
        c: { tap: "c", swipe_up: "、", long_press: { display: "bubble", values: [{ action: commit, value: "c" }, { action: commit, value: "C" }] } }
@@ -583,7 +610,7 @@
        m: { tap: "m", swipe_up: "#", long_press: { display: "bubble", values: [{ action: commit, value: "m" }, { action: commit, value: "M" }] } }
        # shift：单击切单击态、双击锁定大写（命令值走键盘按键路由）
        shift: { width: 1.4, tap: { action: command, value: shift_single }, double_tap: { action: command, value: shift_caps } }
-@@ -707,9 +724,9 @@
+@@ -736,9 +753,9 @@
        z: { tap: { value: "z", bubble: false }, swipe_up: { label: "＊", value: "*" }, swipe_down: { label: "", action: "none", display: "key", bubble: false }, long_press: { display: "bubble", values: [{ action: commit, value: "z" }, { action: commit, value: "Z" }] } }
        x: { tap: { value: "x", bubble: false }, swipe_up: { label: "＠", value: "@" }, swipe_down: { label: "弓匕纟幺弓𠤎", action: "none", display: "bubble" }, long_press: { display: "bubble", values: [{ action: commit, value: "x" }, { action: commit, value: "X" }] } }
        c: { tap: { value: "c", bubble: false }, swipe_up: { label: "、", value: "、" }, swipe_down: { label: "又巴马厶龴ス", action: "none", display: "bubble" }, long_press: { display: "bubble", values: [{ action: commit, value: "c" }, { action: commit, value: "C" }, { action: commit, value: "ç" }] } }
@@ -595,7 +622,7 @@
        m: { tap: { value: "m", bubble: false }, swipe_up: { label: "＃", value: "#" }, swipe_down: { label: "山由贝冂冎几", action: "none", display: "bubble" }, long_press: { display: "bubble", values: [{ action: commit, value: "m" }, { action: commit, value: "M" }] } }
        # 逗号/句号独立成键（value 经 rime 引擎，中文态自动转全角）
        comma: { width: 1, tap: {  label: "，", value: ",", bubble: false } }
-@@ -762,9 +779,9 @@
+@@ -791,9 +808,9 @@
        z: { tap: { value: "z", bubble: false }, swipe_up: "*", long_press: { display: "bubble", values: [{ action: commit, value: "z" }, { action: commit, value: "Z" }] } }
        x: { tap: { value: "x", bubble: false }, swipe_up: "@", long_press: { display: "bubble", values: [{ action: commit, value: "x" }, { action: commit, value: "X" }] } }
        c: { tap: { value: "c", bubble: false }, swipe_up: "、", long_press: { display: "bubble", values: [{ action: commit, value: "c" }, { action: commit, value: "C" }] } }
@@ -830,7 +857,7 @@
              }
 --- a/app/src/main/java/com/kingzcheung/xime/viewmodel/KeyboardViewModel.kt
 +++ b/app/src/main/java/com/kingzcheung/xime/viewmodel/KeyboardViewModel.kt
-@@ -599,7 +599,18 @@
+@@ -605,7 +605,18 @@
      fun closeOverlay() {
          val current = _page.value
          if (current is KeyboardPage.Overlay) {
@@ -852,7 +879,7 @@
      }
 --- a/app/src/main/java/com/kingzcheung/xime/settings/SettingsPreferences.kt
 +++ b/app/src/main/java/com/kingzcheung/xime/settings/SettingsPreferences.kt
-@@ -717,7 +717,7 @@
+@@ -714,7 +714,7 @@
      private const val KEY_KEYBOARD_FLUSH_BOTTOM = "keyboard_flush_bottom"
  
      fun isKeyboardFlushBottom(context: Context): Boolean {

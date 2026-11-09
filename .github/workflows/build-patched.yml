@@ -390,6 +390,16 @@ jobs:
           if ! grep -q -F 'swipeUpSymbol' "$WS/$F2"; then echo "::error::长按气泡未带上滑符号（swipeUpSymbol 未出现）"; fail=1; fi
           if ! grep -q -F 'onSwipeUp?.invoke(swipeUpSymbol)' "$WS/$F2"; then echo "::error::气泡里选中上滑符号后未走真实上滑提交路径"; fail=1; fi
           if ! grep -q -F 'isLetterKey' "$WS/$F2"; then echo "::error::长按气泡未启用本键专属符号（isLetterKey 未出现）"; fail=1; fi
+          # alpha.3 适配：上游新增按键级外观自定义，字母键渲染块改为 keyStyle + CompositionLocalProvider。
+          # 两个分支（横屏 compactButton / 普通）都必须注册包围盒；三方合并曾把横屏分支的注册链吃掉，
+          # 导致横屏滑键误触修复静默失效（无报错、断言全绿，只有行为退化）。
+          if ! grep -q -F 'val keyStyle = keyStyleOverride("qwerty", key, isAsciiMode, isDarkTheme)' "$WS/$F2"; then echo "::error::未适配上游 v3.5.0-alpha.3 的按键级外观结构（keyStyleOverride 缺失）"; fail=1; fi
+          cr=$(grep -c -F 'Modifier.onGloballyPositioned { slideRegistry.register(key, it.boundsInRoot()) }' "$WS/$F2" || true)
+          if [ "$cr" != "2" ]; then echo "::error::滑键注册表包围盒应注册 2 处（横屏 + 普通字母键），实际 $cr 处"; fail=1; fi
+          # 无键帽模式（全局开关）优先于上游按键级 background：否则逐键配色会把已隐藏的键帽底色带回来。
+          if ! grep -q -F 'config.keyBackgroundColor.alpha < 0.05f' "$WS/$F2"; then echo "::error::字母键缺无键帽优先级守卫（按键级 background 会覆盖全局透明）"; fail=1; fi
+          if ! grep -q -F 'env.keyBackgroundColor.alpha < 0.05f' "$WS/$F2"; then echo "::error::功能键缺无键帽优先级守卫（按键级 background 会覆盖全局透明）"; fail=1; fi
+          if ! grep -q -F 'styleEffective' "$WS/$F2"; then echo "::error::FunctionKeyCell 未屏蔽按键级 background（无键帽模式会被逐键配色破坏）"; fail=1; fi
           # KeyButton.kt：透明底色分支应出现 6 次（crispShadowColor 1 处 + 5 个键面站点）
           c3=$(grep -c -F 'backgroundColor.alpha < 0.05f' "$WS/$F3" || true)
           if [ "$c3" != "6" ]; then echo "::error::$N3 里『透明底色分支』出现 $c3 次，应为 6 次"; fail=1; fi
