@@ -787,6 +787,19 @@ jobs:
         #     ② 上面额外缓存已下好的 AAR，缓存命中时连解压都走本地、完全不碰网络；
         #     ③ 套一层 timeout 兜底：真下不动就快速失败，而不是无限期占着 runner。
         run: |
+          # 上游 v3.6.0-alpha.1 把 ONNX 升到 v1.28.0，但头文件仍从 raw.githubusercontent.com 取，
+          # 该源对 v1.28.0 全 404（2026-11-23 run #74 实测，三个 gh 代理也一样）；
+          # jsDelivr 的 gh 镜像有同样的头文件（已验证 HTTP 200）。这里在下载前把 base 换掉，
+          # 并清空 ghMirrors，避免给 jsDelivr URL 误加代理前缀、每个头文件空转 5 次重试。
+          python3 - <<'PY'
+          import re
+          p = 'app/build-logic/tasks-native.gradle.kts'
+          s = open(p, encoding='utf-8').read()
+          s = s.replace('https://raw.githubusercontent.com/microsoft/onnxruntime/v${onnxVersion}/include/onnxruntime', 'https://cdn.jsdelivr.net/gh/microsoft/onnxruntime@v${onnxVersion}/include/onnxruntime')
+          s = re.sub(r'val ghMirrors = listOf\([^)]*\)', 'val ghMirrors = listOf<String>()', s)
+          open(p, 'w', encoding='utf-8').write(s)
+          PY
+          grep -n 'onnxHeadersBase\|ghMirrors' app/build-logic/tasks-native.gradle.kts
           timeout 900 ./gradlew downloadOnnx --no-daemon || {
             echo "::error::下载 ONNX Runtime 失败或超过 15 分钟超时 —— 检查 runner 到 Maven Central / 镜像源的连通性。"
             exit 1
