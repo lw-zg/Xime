@@ -1,0 +1,9 @@
+# 把方案/插件/模型市场指向本仓库的镜像（官方镜像保留作后备）
+xime_index:
+  base_urls:
+    - "https://cdn.jsdelivr.net/gh/lw-zg/Xime@xime-index/"
+    - "https://fastly.jsdelivr.net/gh/lw-zg/Xime@xime-index/"
+    - "https://raw.githubusercontent.com/lw-zg/Xime/refs/heads/xime-index/"
+    - "https://cdn.jsdelivr.net/gh/ximeiorg/xime-index@master/"
+    - "https://fastly.jsdelivr.net/gh/ximeiorg/xime-index@master/"
+    - "https://index.ximei.me/"
